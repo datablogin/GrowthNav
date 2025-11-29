@@ -48,7 +48,10 @@ class TestBigQueryConfig:
         assert config.location == "EU"
 
     def test_from_env_with_growthnav_project_id(self, monkeypatch):
-        """Test BigQueryConfig.from_env() with GROWTNAV_PROJECT_ID."""
+        """Test BigQueryConfig.from_env() with GROWTNAV_PROJECT_ID fallback."""
+        # Clear GCP_PROJECT_ID so GROWTNAV_PROJECT_ID is used as fallback
+        monkeypatch.delenv("GCP_PROJECT_ID", raising=False)
+        monkeypatch.delenv("GOOGLE_CLOUD_PROJECT", raising=False)
         monkeypatch.setenv("GROWTNAV_PROJECT_ID", "growthnav-project")
         monkeypatch.setenv("GROWTNAV_BQ_LOCATION", "US")
 
