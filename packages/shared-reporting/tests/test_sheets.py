@@ -57,13 +57,14 @@ class TestSheetsExporter:
         assert client is mock_client
         assert exporter._client is mock_client
 
-        # Verify credentials were loaded with correct scopes
+        # Verify credentials were loaded with correct scopes and subject for domain-wide delegation
         mock_creds_class.from_service_account_file.assert_called_once_with(
             str(creds_file),
             scopes=[
                 "https://www.googleapis.com/auth/spreadsheets",
                 "https://www.googleapis.com/auth/drive.file",
             ],
+            subject="access@roimediapartners.com",  # Default impersonation email
         )
 
         # Verify client was authorized

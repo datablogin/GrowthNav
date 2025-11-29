@@ -66,6 +66,10 @@ jobs:
       - name: Run tests with coverage
         env:
           GCP_PROJECT_ID: ${{ env.GCP_PROJECT_ID }}
+          # Enable Google Sheets integration tests (requires domain-wide delegation)
+          RUN_SHEETS_INTEGRATION_TESTS: "1"
+          # Slides integration tests disabled - implementation needs placeholder ID fix
+          # RUN_SLIDES_INTEGRATION_TESTS: "1"
         run: |
           uv run pytest packages/ \
             --cov=growthnav \

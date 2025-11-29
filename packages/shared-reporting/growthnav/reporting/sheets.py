@@ -5,6 +5,7 @@ Based on existing PaidSocialNav implementation with improvements:
 - Batch operations to avoid rate limits
 - Conditional formatting for metrics
 - Template-based sheet structure
+- Domain-wide delegation support for service accounts
 """
 
 from __future__ import annotations
@@ -13,6 +14,9 @@ import os
 from typing import Any
 
 import pandas as pd
+
+# Default impersonation email for domain-wide delegation
+DEFAULT_IMPERSONATE_EMAIL = "access@roimediapartners.com"
 
 
 class SheetsExporter:
@@ -26,6 +30,12 @@ class SheetsExporter:
             data=df,
             share_with=["user@example.com"]
         )
+
+    For domain-wide delegation:
+        sheets = SheetsExporter(
+            credentials_path="service_account.json",
+            impersonate_email="user@yourdomain.com"
+        )
     """
 
     # Google Sheets API rate limits
@@ -35,6 +45,7 @@ class SheetsExporter:
     def __init__(
         self,
         credentials_path: str | None = None,
+        impersonate_email: str | None = None,
     ):
         """
         Initialize Sheets exporter.
@@ -42,9 +53,15 @@ class SheetsExporter:
         Args:
             credentials_path: Path to service account JSON
                              (default: GOOGLE_APPLICATION_CREDENTIALS env var)
+            impersonate_email: Email to impersonate for domain-wide delegation
+                              (default: GROWTHNAV_IMPERSONATE_EMAIL env var or
+                               access@roimediapartners.com)
         """
         self.credentials_path = credentials_path or os.getenv(
             "GOOGLE_APPLICATION_CREDENTIALS"
+        )
+        self.impersonate_email = impersonate_email or os.getenv(
+            "GROWTHNAV_IMPERSONATE_EMAIL", DEFAULT_IMPERSONATE_EMAIL
         )
         self._client = None
 
@@ -70,10 +87,11 @@ class SheetsExporter:
                     cred_data = json.load(f)
 
                 if cred_data.get("type") == "service_account":
-                    # Use service account credentials
+                    # Use service account credentials with domain-wide delegation
                     creds = Credentials.from_service_account_file(
                         self.credentials_path,
                         scopes=scopes,
+                        subject=self.impersonate_email,  # Impersonate user
                     )
                 else:
                     # Not a service account file, use ADC

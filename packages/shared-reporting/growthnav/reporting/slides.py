@@ -5,6 +5,7 @@ P1 Priority Feature:
 - Template-based slide creation
 - Chart embedding from matplotlib/plotly
 - Consistent branding across presentations
+- Domain-wide delegation support for service accounts
 
 Build/Buy/Borrow Options Considered:
 1. google-api-python-client (Build) - Direct API, full control
@@ -25,6 +26,9 @@ from typing import Any
 import google.auth
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
+
+# Default impersonation email for domain-wide delegation
+DEFAULT_IMPERSONATE_EMAIL = "access@roimediapartners.com"
 
 
 class SlideLayout(str, Enum):
@@ -70,20 +74,33 @@ class SlidesGenerator:
                 ),
             ]
         )
+
+    For domain-wide delegation:
+        slides = SlidesGenerator(
+            credentials_path="service_account.json",
+            impersonate_email="user@yourdomain.com"
+        )
     """
 
     def __init__(
         self,
         credentials_path: str | None = None,
+        impersonate_email: str | None = None,
     ):
         """
         Initialize Slides generator.
 
         Args:
             credentials_path: Path to service account JSON or authorized user credentials
+            impersonate_email: Email to impersonate for domain-wide delegation
+                              (default: GROWTHNAV_IMPERSONATE_EMAIL env var or
+                               access@roimediapartners.com)
         """
         self.credentials_path = credentials_path or os.getenv(
             "GOOGLE_APPLICATION_CREDENTIALS"
+        )
+        self.impersonate_email = impersonate_email or os.getenv(
+            "GROWTHNAV_IMPERSONATE_EMAIL", DEFAULT_IMPERSONATE_EMAIL
         )
         self._service = None
         self._drive_service = None
@@ -103,10 +120,11 @@ class SlidesGenerator:
             cred_type = cred_info.get("type")
 
             if cred_type == "service_account":
-                # Service account credentials
+                # Service account credentials with domain-wide delegation
                 return Credentials.from_service_account_file(
                     self.credentials_path,
                     scopes=scopes,
+                    subject=self.impersonate_email,  # Impersonate user
                 )
             elif cred_type == "authorized_user":
                 # Authorized user credentials (from gcloud auth application-default login)
