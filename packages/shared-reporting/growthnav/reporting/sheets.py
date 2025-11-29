@@ -52,7 +52,10 @@ class SheetsExporter:
     def client(self):
         """Lazy initialization of gspread client."""
         if self._client is None:
+            import json
+
             import gspread
+            from google.auth import default
             from google.oauth2.service_account import Credentials
 
             scopes = [
@@ -60,10 +63,25 @@ class SheetsExporter:
                 "https://www.googleapis.com/auth/drive.file",
             ]
 
-            creds = Credentials.from_service_account_file(
-                self.credentials_path,
-                scopes=scopes,
-            )
+            # Check if credentials_path is a service account file
+            if self.credentials_path:
+                # Read the file to determine its type
+                with open(self.credentials_path) as f:
+                    cred_data = json.load(f)
+
+                if cred_data.get("type") == "service_account":
+                    # Use service account credentials
+                    creds = Credentials.from_service_account_file(
+                        self.credentials_path,
+                        scopes=scopes,
+                    )
+                else:
+                    # Not a service account file, use ADC
+                    creds, _ = default(scopes=scopes)
+            else:
+                # Use Application Default Credentials
+                creds, _ = default(scopes=scopes)
+
             self._client = gspread.authorize(creds)
 
         return self._client

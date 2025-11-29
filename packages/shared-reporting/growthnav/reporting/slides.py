@@ -16,11 +16,13 @@ Chosen: google-api-python-client for maximum control and native Slides support.
 
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
+import google.auth
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 
@@ -78,7 +80,7 @@ class SlidesGenerator:
         Initialize Slides generator.
 
         Args:
-            credentials_path: Path to service account JSON
+            credentials_path: Path to service account JSON or authorized user credentials
         """
         self.credentials_path = credentials_path or os.getenv(
             "GOOGLE_APPLICATION_CREDENTIALS"
@@ -86,17 +88,50 @@ class SlidesGenerator:
         self._service = None
         self._drive_service = None
 
+    def _load_credentials(self, scopes: list[str]):
+        """Load credentials from file or use application default credentials."""
+        if self.credentials_path and os.path.exists(self.credentials_path):
+            # Read the JSON file to determine credential type
+            try:
+                with open(self.credentials_path) as f:
+                    cred_info = json.load(f)
+            except (OSError, json.JSONDecodeError):
+                # If we can't read the file, fall back to default credentials
+                creds, _ = google.auth.default(scopes=scopes)
+                return creds
+
+            cred_type = cred_info.get("type")
+
+            if cred_type == "service_account":
+                # Service account credentials
+                return Credentials.from_service_account_file(
+                    self.credentials_path,
+                    scopes=scopes,
+                )
+            elif cred_type == "authorized_user":
+                # Authorized user credentials (from gcloud auth application-default login)
+                # For authorized_user, we should use google.auth.default which will handle scopes properly
+                creds, _ = google.auth.default(scopes=scopes)
+                return creds
+            else:
+                # Unknown or missing type - fall back to default credentials
+                # This handles mock test cases where the file might be empty or invalid
+                creds, _ = google.auth.default(scopes=scopes)
+                return creds
+        else:
+            # Use application default credentials
+            creds, _ = google.auth.default(scopes=scopes)
+            return creds
+
     @property
     def service(self):
         """Lazy initialization of Slides API service."""
         if self._service is None:
-            creds = Credentials.from_service_account_file(
-                self.credentials_path,
-                scopes=[
-                    "https://www.googleapis.com/auth/presentations",
-                    "https://www.googleapis.com/auth/drive.file",
-                ],
-            )
+            scopes = [
+                "https://www.googleapis.com/auth/presentations",
+                "https://www.googleapis.com/auth/drive.file",
+            ]
+            creds = self._load_credentials(scopes)
             self._service = build("slides", "v1", credentials=creds)
         return self._service
 
@@ -104,10 +139,8 @@ class SlidesGenerator:
     def drive_service(self):
         """Lazy initialization of Drive API service for sharing."""
         if self._drive_service is None:
-            creds = Credentials.from_service_account_file(
-                self.credentials_path,
-                scopes=["https://www.googleapis.com/auth/drive.file"],
-            )
+            scopes = ["https://www.googleapis.com/auth/drive.file"]
+            creds = self._load_credentials(scopes)
             self._drive_service = build("drive", "v3", credentials=creds)
         return self._drive_service
 

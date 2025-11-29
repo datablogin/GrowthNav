@@ -40,7 +40,8 @@ class TestSheetsExporter:
     def test_client_lazy_initialization(self, mock_authorize, mock_creds_class, tmp_path):
         """Test that gspread client is lazily initialized."""
         creds_file = tmp_path / "creds.json"
-        creds_file.write_text("{}")
+        # Create a service account file
+        creds_file.write_text('{"type": "service_account", "project_id": "test", "private_key": "test"}')
 
         # Mock credentials and client
         mock_creds = MagicMock()
@@ -68,12 +69,44 @@ class TestSheetsExporter:
         # Verify client was authorized
         mock_authorize.assert_called_once_with(mock_creds)
 
+    @patch("google.auth.default")
+    @patch("gspread.authorize")
+    def test_client_uses_adc_when_no_credentials_path(self, mock_authorize, mock_default, monkeypatch):
+        """Test that client uses Application Default Credentials when no path provided."""
+        # Ensure no credentials path is set
+        monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
+
+        # Mock ADC
+        mock_creds = MagicMock()
+        mock_project = "test-project"
+        mock_default.return_value = (mock_creds, mock_project)
+
+        mock_client = MagicMock()
+        mock_authorize.return_value = mock_client
+
+        exporter = SheetsExporter(credentials_path=None)
+
+        # Access client
+        client = exporter.client
+        assert client is mock_client
+
+        # Verify ADC was used
+        mock_default.assert_called_once_with(
+            scopes=[
+                "https://www.googleapis.com/auth/spreadsheets",
+                "https://www.googleapis.com/auth/drive.file",
+            ]
+        )
+
+        # Verify client was authorized with ADC
+        mock_authorize.assert_called_once_with(mock_creds)
+
     @patch("google.oauth2.service_account.Credentials")
     @patch("gspread.authorize")
     def test_create_dashboard_with_dataframe(self, mock_authorize, mock_creds_class, tmp_path):
         """Test creating dashboard with DataFrame."""
         creds_file = tmp_path / "creds.json"
-        creds_file.write_text("{}")
+        creds_file.write_text('{"type": "service_account", "project_id": "test", "private_key": "test"}')
 
         # Mock credentials
         mock_creds = MagicMock()
@@ -130,7 +163,7 @@ class TestSheetsExporter:
     def test_create_dashboard_with_list_of_dicts(self, mock_authorize, mock_creds_class, tmp_path):
         """Test creating dashboard with list of dicts."""
         creds_file = tmp_path / "creds.json"
-        creds_file.write_text("{}")
+        creds_file.write_text('{"type": "service_account", "project_id": "test", "private_key": "test"}')
 
         # Mock setup
         mock_creds = MagicMock()
@@ -168,7 +201,7 @@ class TestSheetsExporter:
     def test_create_dashboard_with_sharing(self, mock_authorize, mock_creds_class, tmp_path):
         """Test creating dashboard with user sharing."""
         creds_file = tmp_path / "creds.json"
-        creds_file.write_text("{}")
+        creds_file.write_text('{"type": "service_account", "project_id": "test", "private_key": "test"}')
 
         # Mock setup
         mock_creds = MagicMock()
@@ -207,7 +240,7 @@ class TestSheetsExporter:
     def test_create_dashboard_with_folder(self, mock_authorize, mock_creds_class, tmp_path):
         """Test creating dashboard in specific folder."""
         creds_file = tmp_path / "creds.json"
-        creds_file.write_text("{}")
+        creds_file.write_text('{"type": "service_account", "project_id": "test", "private_key": "test"}')
 
         # Mock setup
         mock_creds = MagicMock()
@@ -240,7 +273,7 @@ class TestSheetsExporter:
     def test_create_multi_tab_dashboard(self, mock_authorize, mock_creds_class, tmp_path):
         """Test creating multi-tab dashboard."""
         creds_file = tmp_path / "creds.json"
-        creds_file.write_text("{}")
+        creds_file.write_text('{"type": "service_account", "project_id": "test", "private_key": "test"}')
 
         # Mock setup
         mock_creds = MagicMock()
@@ -292,7 +325,7 @@ class TestSheetsExporter:
     def test_create_multi_tab_with_sharing(self, mock_authorize, mock_creds_class, tmp_path):
         """Test multi-tab dashboard with sharing."""
         creds_file = tmp_path / "creds.json"
-        creds_file.write_text("{}")
+        creds_file.write_text('{"type": "service_account", "project_id": "test", "private_key": "test"}')
 
         # Mock setup
         mock_creds = MagicMock()
@@ -330,7 +363,7 @@ class TestSheetsExporter:
     def test_update_sheet(self, mock_authorize, mock_creds_class, tmp_path):
         """Test updating existing sheet."""
         creds_file = tmp_path / "creds.json"
-        creds_file.write_text("{}")
+        creds_file.write_text('{"type": "service_account", "project_id": "test", "private_key": "test"}')
 
         # Mock setup
         mock_creds = MagicMock()
@@ -372,7 +405,7 @@ class TestSheetsExporter:
     def test_update_sheet_custom_name(self, mock_authorize, mock_creds_class, tmp_path):
         """Test updating sheet with custom sheet name."""
         creds_file = tmp_path / "creds.json"
-        creds_file.write_text("{}")
+        creds_file.write_text('{"type": "service_account", "project_id": "test", "private_key": "test"}')
 
         # Mock setup
         mock_creds = MagicMock()
@@ -451,7 +484,7 @@ class TestSheetsExporter:
     def test_batch_update_from_dataframe(self, mock_authorize, mock_creds_class, tmp_path):
         """Test batch update processes data correctly."""
         creds_file = tmp_path / "creds.json"
-        creds_file.write_text("{}")
+        creds_file.write_text('{"type": "service_account", "project_id": "test", "private_key": "test"}')
 
         # Mock setup
         mock_creds = MagicMock()

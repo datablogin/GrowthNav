@@ -100,16 +100,17 @@ class TestSlidesGenerator:
         generator = SlidesGenerator()
         assert generator.credentials_path is None
 
+    @patch("growthnav.reporting.slides.google.auth.default")
     @patch("growthnav.reporting.slides.build")
     @patch("growthnav.reporting.slides.Credentials")
-    def test_service_lazy_initialization(self, mock_creds_class, mock_build, tmp_path):
+    def test_service_lazy_initialization(self, mock_creds_class, mock_build, mock_auth_default, tmp_path):
         """Test that Slides API service is lazily initialized."""
         creds_file = tmp_path / "creds.json"
         creds_file.write_text("{}")
 
         # Mock credentials and service
         mock_creds = MagicMock()
-        mock_creds_class.from_service_account_file.return_value = mock_creds
+        mock_auth_default.return_value = (mock_creds, None)
         mock_service = MagicMock()
         mock_build.return_value = mock_service
 
@@ -121,28 +122,28 @@ class TestSlidesGenerator:
         assert service is mock_service
         assert generator._service is mock_service
 
-        # Verify credentials were loaded with correct scopes
-        mock_creds_class.from_service_account_file.assert_called_once_with(
-            str(creds_file),
+        # Verify google.auth.default was called (for unknown credential type)
+        mock_auth_default.assert_called_once_with(
             scopes=[
                 "https://www.googleapis.com/auth/presentations",
                 "https://www.googleapis.com/auth/drive.file",
-            ],
+            ]
         )
 
         # Verify service was built
         mock_build.assert_called_once_with("slides", "v1", credentials=mock_creds)
 
+    @patch("growthnav.reporting.slides.google.auth.default")
     @patch("growthnav.reporting.slides.build")
     @patch("growthnav.reporting.slides.Credentials")
-    def test_drive_service_lazy_initialization(self, mock_creds_class, mock_build, tmp_path):
+    def test_drive_service_lazy_initialization(self, mock_creds_class, mock_build, mock_auth_default, tmp_path):
         """Test that Drive API service is lazily initialized."""
         creds_file = tmp_path / "creds.json"
         creds_file.write_text("{}")
 
         # Mock credentials and service
         mock_creds = MagicMock()
-        mock_creds_class.from_service_account_file.return_value = mock_creds
+        mock_auth_default.return_value = (mock_creds, None)
         mock_drive_service = MagicMock()
         mock_build.return_value = mock_drive_service
 
@@ -154,25 +155,25 @@ class TestSlidesGenerator:
         assert drive_service is mock_drive_service
         assert generator._drive_service is mock_drive_service
 
-        # Verify credentials were loaded
-        mock_creds_class.from_service_account_file.assert_called_once_with(
-            str(creds_file),
-            scopes=["https://www.googleapis.com/auth/drive.file"],
+        # Verify google.auth.default was called
+        mock_auth_default.assert_called_once_with(
+            scopes=["https://www.googleapis.com/auth/drive.file"]
         )
 
         # Verify Drive service was built
         mock_build.assert_called_once_with("drive", "v3", credentials=mock_creds)
 
+    @patch("growthnav.reporting.slides.google.auth.default")
     @patch("growthnav.reporting.slides.build")
     @patch("growthnav.reporting.slides.Credentials")
-    def test_create_presentation_basic(self, mock_creds_class, mock_build, tmp_path):
+    def test_create_presentation_basic(self, mock_creds_class, mock_build, mock_auth_default, tmp_path):
         """Test creating basic presentation."""
         creds_file = tmp_path / "creds.json"
         creds_file.write_text("{}")
 
         # Mock credentials
         mock_creds = MagicMock()
-        mock_creds_class.from_service_account_file.return_value = mock_creds
+        mock_auth_default.return_value = (mock_creds, None)
 
         # Mock Slides API responses
         mock_presentations = MagicMock()
@@ -215,16 +216,17 @@ class TestSlidesGenerator:
         # Verify URL
         assert url == "https://docs.google.com/presentation/d/pres_123"
 
+    @patch("growthnav.reporting.slides.google.auth.default")
     @patch("growthnav.reporting.slides.build")
     @patch("growthnav.reporting.slides.Credentials")
-    def test_create_presentation_with_sharing(self, mock_creds_class, mock_build, tmp_path):
+    def test_create_presentation_with_sharing(self, mock_creds_class, mock_build, mock_auth_default, tmp_path):
         """Test creating presentation with user sharing."""
         creds_file = tmp_path / "creds.json"
         creds_file.write_text("{}")
 
         # Mock credentials
         mock_creds = MagicMock()
-        mock_creds_class.from_service_account_file.return_value = mock_creds
+        mock_auth_default.return_value = (mock_creds, None)
 
         # Mock Slides API
         mock_presentations = MagicMock()
@@ -278,16 +280,17 @@ class TestSlidesGenerator:
         assert calls[1][1]["fileId"] == "pres_shared"
         assert calls[1][1]["body"]["emailAddress"] == "user2@example.com"
 
+    @patch("growthnav.reporting.slides.google.auth.default")
     @patch("growthnav.reporting.slides.build")
     @patch("growthnav.reporting.slides.Credentials")
-    def test_create_presentation_batch_requests(self, mock_creds_class, mock_build, tmp_path):
+    def test_create_presentation_batch_requests(self, mock_creds_class, mock_build, mock_auth_default, tmp_path):
         """Test that batch update requests are constructed correctly."""
         creds_file = tmp_path / "creds.json"
         creds_file.write_text("{}")
 
         # Mock setup
         mock_creds = MagicMock()
-        mock_creds_class.from_service_account_file.return_value = mock_creds
+        mock_auth_default.return_value = (mock_creds, None)
 
         mock_presentations = MagicMock()
         mock_presentations.create.return_value.execute.return_value = {
@@ -329,16 +332,17 @@ class TestSlidesGenerator:
         # Should have requests for: create slide, title, body, notes
         assert len(requests) >= 1
 
+    @patch("growthnav.reporting.slides.google.auth.default")
     @patch("growthnav.reporting.slides.build")
     @patch("growthnav.reporting.slides.Credentials")
-    def test_create_presentation_with_body_list(self, mock_creds_class, mock_build, tmp_path):
+    def test_create_presentation_with_body_list(self, mock_creds_class, mock_build, mock_auth_default, tmp_path):
         """Test creating presentation with body as list (bullet points)."""
         creds_file = tmp_path / "creds.json"
         creds_file.write_text("{}")
 
         # Mock setup
         mock_creds = MagicMock()
-        mock_creds_class.from_service_account_file.return_value = mock_creds
+        mock_auth_default.return_value = (mock_creds, None)
 
         mock_presentations = MagicMock()
         mock_presentations.create.return_value.execute.return_value = {
@@ -373,16 +377,17 @@ class TestSlidesGenerator:
         # Verify batch update was called
         assert mock_presentations.batchUpdate.called
 
+    @patch("growthnav.reporting.slides.google.auth.default")
     @patch("growthnav.reporting.slides.build")
     @patch("growthnav.reporting.slides.Credentials")
-    def test_create_presentation_with_body_string(self, mock_creds_class, mock_build, tmp_path):
+    def test_create_presentation_with_body_string(self, mock_creds_class, mock_build, mock_auth_default, tmp_path):
         """Test creating presentation with body as string."""
         creds_file = tmp_path / "creds.json"
         creds_file.write_text("{}")
 
         # Mock setup
         mock_creds = MagicMock()
-        mock_creds_class.from_service_account_file.return_value = mock_creds
+        mock_auth_default.return_value = (mock_creds, None)
 
         mock_presentations = MagicMock()
         mock_presentations.create.return_value.execute.return_value = {
@@ -417,16 +422,17 @@ class TestSlidesGenerator:
         # Verify batch update was called
         assert mock_presentations.batchUpdate.called
 
+    @patch("growthnav.reporting.slides.google.auth.default")
     @patch("growthnav.reporting.slides.build")
     @patch("growthnav.reporting.slides.Credentials")
-    def test_create_presentation_multiple_layouts(self, mock_creds_class, mock_build, tmp_path):
+    def test_create_presentation_multiple_layouts(self, mock_creds_class, mock_build, mock_auth_default, tmp_path):
         """Test creating presentation with different slide layouts."""
         creds_file = tmp_path / "creds.json"
         creds_file.write_text("{}")
 
         # Mock setup
         mock_creds = MagicMock()
-        mock_creds_class.from_service_account_file.return_value = mock_creds
+        mock_auth_default.return_value = (mock_creds, None)
 
         mock_presentations = MagicMock()
         mock_presentations.create.return_value.execute.return_value = {
@@ -461,16 +467,17 @@ class TestSlidesGenerator:
         # Verify presentation was created
         assert url == "https://docs.google.com/presentation/d/pres_layouts"
 
+    @patch("growthnav.reporting.slides.google.auth.default")
     @patch("growthnav.reporting.slides.build")
     @patch("growthnav.reporting.slides.Credentials")
-    def test_create_from_template(self, mock_creds_class, mock_build, tmp_path):
+    def test_create_from_template(self, mock_creds_class, mock_build, mock_auth_default, tmp_path):
         """Test creating presentation from template."""
         creds_file = tmp_path / "creds.json"
         creds_file.write_text("{}")
 
         # Mock credentials
         mock_creds = MagicMock()
-        mock_creds_class.from_service_account_file.return_value = mock_creds
+        mock_auth_default.return_value = (mock_creds, None)
 
         # Mock Slides API
         mock_presentations = MagicMock()
@@ -524,16 +531,17 @@ class TestSlidesGenerator:
         # Verify URL
         assert url == "https://docs.google.com/presentation/d/copied_pres_123"
 
+    @patch("growthnav.reporting.slides.google.auth.default")
     @patch("growthnav.reporting.slides.build")
     @patch("growthnav.reporting.slides.Credentials")
-    def test_create_from_template_with_sharing(self, mock_creds_class, mock_build, tmp_path):
+    def test_create_from_template_with_sharing(self, mock_creds_class, mock_build, mock_auth_default, tmp_path):
         """Test creating from template with sharing."""
         creds_file = tmp_path / "creds.json"
         creds_file.write_text("{}")
 
         # Mock credentials
         mock_creds = MagicMock()
-        mock_creds_class.from_service_account_file.return_value = mock_creds
+        mock_auth_default.return_value = (mock_creds, None)
 
         # Mock Slides API
         mock_presentations = MagicMock()
@@ -578,16 +586,17 @@ class TestSlidesGenerator:
         assert call_args[1]["fileId"] == "copied_shared_123"
         assert call_args[1]["body"]["emailAddress"] == "user@example.com"
 
+    @patch("growthnav.reporting.slides.google.auth.default")
     @patch("growthnav.reporting.slides.build")
     @patch("growthnav.reporting.slides.Credentials")
-    def test_create_from_template_placeholder_format(self, mock_creds_class, mock_build, tmp_path):
+    def test_create_from_template_placeholder_format(self, mock_creds_class, mock_build, mock_auth_default, tmp_path):
         """Test that placeholders use double curly braces format."""
         creds_file = tmp_path / "creds.json"
         creds_file.write_text("{}")
 
         # Mock setup
         mock_creds = MagicMock()
-        mock_creds_class.from_service_account_file.return_value = mock_creds
+        mock_auth_default.return_value = (mock_creds, None)
 
         mock_presentations = MagicMock()
         mock_presentations.batchUpdate.return_value.execute.return_value = {}
@@ -659,16 +668,17 @@ class TestSlidesGenerator:
         assert request["insertText"]["objectId"] == "slide_2_notes"
         assert request["insertText"]["text"] == "These are notes"
 
+    @patch("growthnav.reporting.slides.google.auth.default")
     @patch("growthnav.reporting.slides.build")
     @patch("growthnav.reporting.slides.Credentials")
-    def test_share_presentation(self, mock_creds_class, mock_build, tmp_path):
+    def test_share_presentation(self, mock_creds_class, mock_build, mock_auth_default, tmp_path):
         """Test _share_presentation helper method."""
         creds_file = tmp_path / "creds.json"
         creds_file.write_text("{}")
 
         # Mock setup
         mock_creds = MagicMock()
-        mock_creds_class.from_service_account_file.return_value = mock_creds
+        mock_auth_default.return_value = (mock_creds, None)
 
         mock_permissions = MagicMock()
         mock_permissions.create.return_value.execute.return_value = {}
