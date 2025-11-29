@@ -21,6 +21,10 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = [
+    "B019",  # Allow lru_cache on methods - intentional caching pattern
+    "E501",  # Line too long - handled by formatter, allow in test data
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

@@ -73,7 +73,7 @@ class PDFGenerator:
         """
         # Import here to avoid requiring weasyprint for non-PDF usage
         try:
-            from weasyprint import CSS, HTML
+            from weasyprint import HTML
         except ImportError as e:
             raise ImportError(
                 "WeasyPrint is required for PDF generation. "

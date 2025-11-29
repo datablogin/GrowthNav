@@ -135,7 +135,7 @@ class TestPDFGenerator:
              patch("weasyprint.CSS", mock_css_class):
             # Generate PDF
             pdf = PDFGenerator(templates_dir=templates_dir)
-            result = pdf.generate(
+            pdf.generate(
                 data={"title": "Test PDF"},
                 template="simple"
             )
@@ -167,7 +167,7 @@ class TestPDFGenerator:
             # Generate with custom CSS
             pdf = PDFGenerator(templates_dir=templates_dir)
             custom_css = "body { color: red; }"
-            result = pdf.generate(
+            pdf.generate(
                 data={},
                 template="styled",
                 css=custom_css
@@ -197,7 +197,7 @@ class TestPDFGenerator:
              patch("weasyprint.CSS", mock_css_class):
             # Generate
             pdf = PDFGenerator(templates_dir=templates_dir)
-            result = pdf.generate(
+            pdf.generate(
                 data={"title": "My Title", "content": "My Content"},
                 template="content",
                 css="p { font-size: 14px; }"
@@ -215,7 +215,7 @@ class TestPDFGenerator:
         template_file = templates_dir / "test.html.j2"
         template_file.write_text("<html><body>Test</body></html>")
 
-        pdf = PDFGenerator(templates_dir=templates_dir)
+        PDFGenerator(templates_dir=templates_dir)
 
         # Mock import failure
         with patch.dict("sys.modules", {"weasyprint": None}):
@@ -282,7 +282,7 @@ class TestPDFGenerator:
 
         pdf = PDFGenerator(templates_dir=templates_dir)
 
-        with pytest.raises(Exception):  # Jinja2 TemplateNotFound
+        with pytest.raises(Exception):  # noqa: B017 - Jinja2 TemplateNotFound
             pdf.render_html(data={}, template="nonexistent")
 
     def test_render_html_basic_rendering(self, tmp_path):

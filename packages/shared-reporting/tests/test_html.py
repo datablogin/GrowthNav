@@ -179,7 +179,7 @@ class TestHTMLRenderer:
 
         renderer = HTMLRenderer(templates_dir=templates_dir)
 
-        with pytest.raises(Exception):  # Jinja2 TemplateNotFound
+        with pytest.raises(Exception):  # noqa: B017 - Jinja2 TemplateNotFound
             renderer.render(template="nonexistent", data={})
 
     def test_list_templates_empty(self, tmp_path):

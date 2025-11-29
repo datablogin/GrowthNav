@@ -12,13 +12,11 @@ Run with: uv run pytest packages/shared-bigquery/tests/test_integration_bigquery
 """
 
 import os
+
 import pytest
-from datetime import datetime, timezone
-
-from growthnav.bigquery.client import TenantBigQueryClient, BigQueryConfig, QueryResult
-from growthnav.bigquery.registry import CustomerRegistry, Customer, Industry, CustomerStatus
-from growthnav.bigquery.validation import QueryValidator, ValidationResult, ValidationSeverity
-
+from growthnav.bigquery.client import BigQueryConfig, QueryResult, TenantBigQueryClient
+from growthnav.bigquery.registry import Customer, CustomerRegistry, CustomerStatus, Industry
+from growthnav.bigquery.validation import QueryValidator, ValidationSeverity
 
 # Skip all tests in this file if GCP credentials are not available
 pytestmark = pytest.mark.skipif(

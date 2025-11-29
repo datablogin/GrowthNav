@@ -188,7 +188,7 @@ class TestSheetsExporter:
         exporter = SheetsExporter(credentials_path=str(creds_file))
         df = pd.DataFrame({"col": [1, 2, 3]})
 
-        url = exporter.create_dashboard(
+        exporter.create_dashboard(
             title="Shared Dashboard",
             data=df,
             share_with=["user1@example.com", "user2@example.com"],
@@ -226,7 +226,7 @@ class TestSheetsExporter:
         exporter = SheetsExporter(credentials_path=str(creds_file))
         df = pd.DataFrame({"col": [1]})
 
-        url = exporter.create_dashboard(
+        exporter.create_dashboard(
             title="In Folder",
             data=df,
             folder_id="folder_abc123",
@@ -268,7 +268,7 @@ class TestSheetsExporter:
             "Analysis": pd.DataFrame({"category": ["X"], "count": [5]}),
         }
 
-        url = exporter.create_multi_tab_dashboard(
+        exporter.create_multi_tab_dashboard(
             title="Multi-Tab Dashboard",
             tabs=tabs,
         )
@@ -312,7 +312,7 @@ class TestSheetsExporter:
         exporter = SheetsExporter(credentials_path=str(creds_file))
         tabs = {"Tab1": pd.DataFrame({"col": [1]})}
 
-        url = exporter.create_multi_tab_dashboard(
+        exporter.create_multi_tab_dashboard(
             title="Shared Multi-Tab",
             tabs=tabs,
             share_with=["user@example.com"],
@@ -474,7 +474,7 @@ class TestSheetsExporter:
             "date": [datetime(2024, 1, 1), datetime(2024, 1, 2)],
         })
 
-        url = exporter.create_dashboard(
+        exporter.create_dashboard(
             title="Batch Test",
             data=df,
         )

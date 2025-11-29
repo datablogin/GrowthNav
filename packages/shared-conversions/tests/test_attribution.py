@@ -598,7 +598,7 @@ class TestAttributeConversions:
             )
         ]
 
-        results = attribute_conversions([conversion], clicks)
+        attribute_conversions([conversion], clicks)
 
         # Check that the original conversion object was updated
         assert conversion.attributed_platform == "google_ads"

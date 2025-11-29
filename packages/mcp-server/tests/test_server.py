@@ -69,7 +69,7 @@ def test_query_bigquery_default_max_results(mock_client_class):
     mock_client.query.return_value = mock_result
 
     # Execute with defaults
-    result = query_bigquery(
+    query_bigquery(
         customer_id="acme",
         sql="SELECT 1",
     )
@@ -450,7 +450,9 @@ def test_create_sheets_dashboard_error(mock_sheets_class, mock_dataframe):
 @patch("growthnav.reporting.slides.SlideLayout")
 @patch("growthnav.reporting.slides.SlideContent")
 @patch("growthnav.reporting.SlidesGenerator")
-def test_create_slides_presentation_success(mock_generator_class, mock_content_class, mock_layout_class):
+def test_create_slides_presentation_success(
+    mock_generator_class, mock_content_class, mock_layout_class
+):
     """Test successful Slides presentation creation."""
     from growthnav_mcp.server import mcp
 
@@ -636,7 +638,7 @@ def test_normalize_crm_data_default_type(mock_normalizer_class, mock_conversion_
     mock_conversion_type_class.return_value = mock_conversion_type
 
     # Execute with default conversion_type
-    result = normalize_crm_data(
+    normalize_crm_data(
         customer_id="test",
         leads=[],
     )
@@ -753,7 +755,9 @@ def test_list_industries(mock_industry_class):
     mock_restaurant = Mock()
     mock_restaurant.value = "restaurant"
 
-    mock_industry_class.__iter__ = Mock(return_value=iter([mock_golf, mock_medical, mock_restaurant]))
+    mock_industry_class.__iter__ = Mock(
+        return_value=iter([mock_golf, mock_medical, mock_restaurant])
+    )
 
     # Execute
     result = list_industries()

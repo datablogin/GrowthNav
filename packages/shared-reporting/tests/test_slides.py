@@ -257,7 +257,7 @@ class TestSlidesGenerator:
         generator = SlidesGenerator(credentials_path=str(creds_file))
         slides = [SlideContent(title="Shared Slide")]
 
-        url = generator.create_presentation(
+        generator.create_presentation(
             title="Shared Presentation",
             slides=slides,
             share_with=["user1@example.com", "user2@example.com"],
@@ -315,7 +315,7 @@ class TestSlidesGenerator:
             ),
         ]
 
-        url = generator.create_presentation(
+        generator.create_presentation(
             title="Batch Test",
             slides=slides,
         )
@@ -365,7 +365,7 @@ class TestSlidesGenerator:
             ),
         ]
 
-        url = generator.create_presentation(
+        generator.create_presentation(
             title="List Test",
             slides=slides,
         )
@@ -409,7 +409,7 @@ class TestSlidesGenerator:
             ),
         ]
 
-        url = generator.create_presentation(
+        generator.create_presentation(
             title="String Test",
             slides=slides,
         )
@@ -565,7 +565,7 @@ class TestSlidesGenerator:
 
         # Create from template with sharing
         generator = SlidesGenerator(credentials_path=str(creds_file))
-        url = generator.create_from_template(
+        generator.create_from_template(
             template_id="template_xyz",
             title="Shared Template",
             replacements={"name": "Test"},
@@ -612,7 +612,7 @@ class TestSlidesGenerator:
 
         # Create from template
         generator = SlidesGenerator(credentials_path=str(creds_file))
-        url = generator.create_from_template(
+        generator.create_from_template(
             template_id="template_id",
             title="Test",
             replacements={"company": "Acme Corp"},
