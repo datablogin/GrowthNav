@@ -21,7 +21,8 @@ import pytest
 from growthnav.reporting.sheets import SheetsExporter
 
 # Rate limit delay between tests (seconds)
-RATE_LIMIT_DELAY = 2
+# Google Sheets API has limits of 60 read/write requests per minute per user
+RATE_LIMIT_DELAY = 5
 
 # Skip all tests unless explicitly enabled via environment variable
 # These tests require Google Workspace access which service accounts may not have
