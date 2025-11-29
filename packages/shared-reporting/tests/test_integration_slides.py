@@ -22,7 +22,6 @@ from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from growthnav.reporting.slides import SlideContent, SlideLayout, SlidesGenerator
 
-
 # Skip all tests unless explicitly enabled via environment variable
 # These tests require Google Workspace access which service accounts may not have
 pytestmark = pytest.mark.skipif(
