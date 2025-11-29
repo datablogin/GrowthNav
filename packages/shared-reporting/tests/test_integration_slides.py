@@ -16,11 +16,15 @@ to create Google Slides presentations.
 """
 
 import os
+import time
 
 import pytest
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from growthnav.reporting.slides import SlideContent, SlideLayout, SlidesGenerator
+
+# Rate limit delay between tests (seconds)
+RATE_LIMIT_DELAY = 2
 
 # Skip all tests unless explicitly enabled via environment variable
 # These tests require Google Workspace access which service accounts may not have
@@ -28,6 +32,13 @@ pytestmark = pytest.mark.skipif(
     not os.getenv("RUN_SLIDES_INTEGRATION_TESTS"),
     reason="Set RUN_SLIDES_INTEGRATION_TESTS=1 to run Google Slides integration tests",
 )
+
+
+@pytest.fixture(autouse=True)
+def rate_limit_delay():
+    """Add delay between tests to avoid rate limiting."""
+    yield
+    time.sleep(RATE_LIMIT_DELAY)
 
 
 class TestSlidesGeneratorIntegration:

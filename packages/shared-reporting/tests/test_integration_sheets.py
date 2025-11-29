@@ -13,11 +13,15 @@ Run with:
 """
 
 import os
+import time
 from datetime import datetime
 
 import pandas as pd
 import pytest
 from growthnav.reporting.sheets import SheetsExporter
+
+# Rate limit delay between tests (seconds)
+RATE_LIMIT_DELAY = 2
 
 # Skip all tests unless explicitly enabled via environment variable
 # These tests require Google Workspace access which service accounts may not have
@@ -25,6 +29,13 @@ pytestmark = pytest.mark.skipif(
     not os.getenv("RUN_SHEETS_INTEGRATION_TESTS"),
     reason="Set RUN_SHEETS_INTEGRATION_TESTS=1 to run Google Sheets integration tests"
 )
+
+
+@pytest.fixture(autouse=True)
+def rate_limit_delay():
+    """Add delay between tests to avoid rate limiting."""
+    yield
+    time.sleep(RATE_LIMIT_DELAY)
 
 
 @pytest.fixture

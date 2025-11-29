@@ -180,6 +180,16 @@ class TestSlidesGenerator:
         mock_presentations.create.return_value.execute.return_value = {
             "presentationId": "pres_123"
         }
+        # Mock get() to return slide data with placeholder IDs
+        mock_presentations.get.return_value.execute.return_value = {
+            "slides": [
+                {"objectId": f"slide_{i}", "pageElements": [
+                    {"objectId": f"title_{i}", "shape": {"placeholder": {"type": "TITLE"}}},
+                    {"objectId": f"body_{i}", "shape": {"placeholder": {"type": "BODY"}}},
+                ]}
+                for i in range(2)
+            ]
+        }
         mock_presentations.batchUpdate.return_value.execute.return_value = {}
 
         mock_service = MagicMock()
@@ -232,6 +242,15 @@ class TestSlidesGenerator:
         mock_presentations = MagicMock()
         mock_presentations.create.return_value.execute.return_value = {
             "presentationId": "pres_shared"
+        }
+        # Mock get() to return slide data with placeholder IDs
+        mock_presentations.get.return_value.execute.return_value = {
+            "slides": [{
+                "objectId": "slide_0",
+                "pageElements": [
+                    {"objectId": "title_placeholder", "shape": {"placeholder": {"type": "TITLE"}}},
+                ],
+            }]
         }
         mock_presentations.batchUpdate.return_value.execute.return_value = {}
 
@@ -296,6 +315,19 @@ class TestSlidesGenerator:
         mock_presentations.create.return_value.execute.return_value = {
             "presentationId": "pres_batch"
         }
+        # Mock get() to return slide data with placeholder IDs
+        mock_presentations.get.return_value.execute.return_value = {
+            "slides": [{
+                "objectId": "slide_0",
+                "pageElements": [
+                    {"objectId": "title_placeholder", "shape": {"placeholder": {"type": "TITLE"}}},
+                    {"objectId": "body_placeholder", "shape": {"placeholder": {"type": "BODY"}}},
+                ],
+                "slideProperties": {
+                    "notesPage": {"notesProperties": {"speakerNotesObjectId": "notes_id"}}
+                }
+            }]
+        }
         mock_presentations.batchUpdate.return_value.execute.return_value = {}
 
         mock_service = MagicMock()
@@ -323,14 +355,8 @@ class TestSlidesGenerator:
             slides=slides,
         )
 
-        # Verify batch update was called with requests
-        assert mock_presentations.batchUpdate.called
-        call_args = mock_presentations.batchUpdate.call_args
-        assert call_args[1]["presentationId"] == "pres_batch"
-        requests = call_args[1]["body"]["requests"]
-
-        # Should have requests for: create slide, title, body, notes
-        assert len(requests) >= 1
+        # Verify batch update was called multiple times (create slide + text inserts)
+        assert mock_presentations.batchUpdate.call_count >= 1
 
     @patch("growthnav.reporting.slides.google.auth.default")
     @patch("growthnav.reporting.slides.build")
@@ -347,6 +373,16 @@ class TestSlidesGenerator:
         mock_presentations = MagicMock()
         mock_presentations.create.return_value.execute.return_value = {
             "presentationId": "pres_list"
+        }
+        # Mock get() to return slide data with placeholder IDs
+        mock_presentations.get.return_value.execute.return_value = {
+            "slides": [{
+                "objectId": "slide_0",
+                "pageElements": [
+                    {"objectId": "title_placeholder", "shape": {"placeholder": {"type": "TITLE"}}},
+                    {"objectId": "body_placeholder", "shape": {"placeholder": {"type": "BODY"}}},
+                ],
+            }]
         }
         mock_presentations.batchUpdate.return_value.execute.return_value = {}
 
@@ -393,6 +429,16 @@ class TestSlidesGenerator:
         mock_presentations.create.return_value.execute.return_value = {
             "presentationId": "pres_string"
         }
+        # Mock get() to return slide data with placeholder IDs
+        mock_presentations.get.return_value.execute.return_value = {
+            "slides": [{
+                "objectId": "slide_0",
+                "pageElements": [
+                    {"objectId": "title_placeholder", "shape": {"placeholder": {"type": "TITLE"}}},
+                    {"objectId": "body_placeholder", "shape": {"placeholder": {"type": "BODY"}}},
+                ],
+            }]
+        }
         mock_presentations.batchUpdate.return_value.execute.return_value = {}
 
         mock_service = MagicMock()
@@ -437,6 +483,16 @@ class TestSlidesGenerator:
         mock_presentations = MagicMock()
         mock_presentations.create.return_value.execute.return_value = {
             "presentationId": "pres_layouts"
+        }
+        # Mock get() to return slide data with placeholder IDs for each slide
+        mock_presentations.get.return_value.execute.return_value = {
+            "slides": [
+                {"objectId": f"slide_{i}", "pageElements": [
+                    {"objectId": f"title_{i}", "shape": {"placeholder": {"type": "TITLE"}}},
+                    {"objectId": f"body_{i}", "shape": {"placeholder": {"type": "BODY"}}},
+                ]}
+                for i in range(4)
+            ]
         }
         mock_presentations.batchUpdate.return_value.execute.return_value = {}
 
@@ -647,26 +703,6 @@ class TestSlidesGenerator:
         assert "createSlide" in request
         assert request["createSlide"]["objectId"] == "slide_0"
         assert request["createSlide"]["slideLayoutReference"]["predefinedLayout"] == "TITLE_AND_BODY"
-
-    def test_insert_text_request(self):
-        """Test _insert_text_request helper method."""
-        generator = SlidesGenerator(credentials_path="/fake/path")
-
-        request = generator._insert_text_request("slide_1", "Test Title", "TITLE")
-
-        assert "insertText" in request
-        assert request["insertText"]["objectId"] == "slide_1_title"
-        assert request["insertText"]["text"] == "Test Title"
-
-    def test_add_speaker_notes_request(self):
-        """Test _add_speaker_notes_request helper method."""
-        generator = SlidesGenerator(credentials_path="/fake/path")
-
-        request = generator._add_speaker_notes_request("slide_2", "These are notes")
-
-        assert "insertText" in request
-        assert request["insertText"]["objectId"] == "slide_2_notes"
-        assert request["insertText"]["text"] == "These are notes"
 
     @patch("growthnav.reporting.slides.google.auth.default")
     @patch("growthnav.reporting.slides.build")

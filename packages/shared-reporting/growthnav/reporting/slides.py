@@ -186,50 +186,89 @@ class SlidesGenerator:
 
         presentation_id = presentation["presentationId"]
 
-        # Build batch update requests
-        requests = []
-
+        # Create slides one at a time to get placeholder IDs
         for i, slide_content in enumerate(slides):
-            # Create slide
             slide_id = f"slide_{i}"
-            requests.append(self._create_slide_request(slide_id, slide_content.layout))
 
-            # Add title
-            requests.append(
-                self._insert_text_request(
-                    slide_id,
-                    slide_content.title,
-                    placeholder_type="TITLE",
-                )
-            )
+            # Create the slide first
+            create_request = {
+                "requests": [self._create_slide_request(slide_id, slide_content.layout)]
+            }
+            self.service.presentations().batchUpdate(
+                presentationId=presentation_id,
+                body=create_request,
+            ).execute()
 
-            # Add body content
-            if slide_content.body:
+            # Get the slide to find placeholder IDs
+            presentation_state = self.service.presentations().get(
+                presentationId=presentation_id
+            ).execute()
+
+            # Find our newly created slide
+            slide_data = None
+            for slide in presentation_state.get("slides", []):
+                if slide.get("objectId") == slide_id:
+                    slide_data = slide
+                    break
+
+            if not slide_data:
+                continue
+
+            # Find placeholder object IDs
+            title_placeholder_id = None
+            body_placeholder_id = None
+            notes_id = slide_data.get("slideProperties", {}).get(
+                "notesPage", {}
+            ).get("notesProperties", {}).get("speakerNotesObjectId")
+
+            for element in slide_data.get("pageElements", []):
+                shape = element.get("shape", {})
+                placeholder = shape.get("placeholder", {})
+                placeholder_type = placeholder.get("type")
+
+                if placeholder_type in ("TITLE", "CENTERED_TITLE"):
+                    title_placeholder_id = element.get("objectId")
+                elif placeholder_type in ("BODY", "SUBTITLE"):
+                    body_placeholder_id = element.get("objectId")
+
+            # Build text insertion requests
+            text_requests = []
+
+            if title_placeholder_id and slide_content.title:
+                text_requests.append({
+                    "insertText": {
+                        "objectId": title_placeholder_id,
+                        "text": slide_content.title,
+                    }
+                })
+
+            if body_placeholder_id and slide_content.body:
                 body_text = (
                     "\n".join(f"• {item}" for item in slide_content.body)
                     if isinstance(slide_content.body, list)
                     else slide_content.body
                 )
-                requests.append(
-                    self._insert_text_request(
-                        slide_id,
-                        body_text,
-                        placeholder_type="BODY",
-                    )
-                )
+                text_requests.append({
+                    "insertText": {
+                        "objectId": body_placeholder_id,
+                        "text": body_text,
+                    }
+                })
 
-            # Add speaker notes
-            if slide_content.notes:
-                requests.append(
-                    self._add_speaker_notes_request(slide_id, slide_content.notes)
-                )
+            if notes_id and slide_content.notes:
+                text_requests.append({
+                    "insertText": {
+                        "objectId": notes_id,
+                        "text": slide_content.notes,
+                    }
+                })
 
-        # Execute batch update
-        if requests:
-            self.service.presentations().batchUpdate(
-                presentationId=presentation_id,
-                body={"requests": requests},
-            ).execute()
+            # Execute text insertions
+            if text_requests:
+                self.service.presentations().batchUpdate(
+                    presentationId=presentation_id,
+                    body={"requests": text_requests},
+                ).execute()
 
         # Share with users
         if share_with:
@@ -250,35 +289,6 @@ class SlidesGenerator:
                 "slideLayoutReference": {
                     "predefinedLayout": layout.value,
                 },
-            }
-        }
-
-    def _insert_text_request(
-        self,
-        slide_id: str,
-        text: str,
-        placeholder_type: str,
-    ) -> dict[str, Any]:
-        """Create request to insert text into a placeholder."""
-        # Note: This is simplified - real implementation needs to find
-        # placeholder IDs from the slide layout
-        return {
-            "insertText": {
-                "objectId": f"{slide_id}_{placeholder_type.lower()}",
-                "text": text,
-            }
-        }
-
-    def _add_speaker_notes_request(
-        self,
-        slide_id: str,
-        notes: str,
-    ) -> dict[str, Any]:
-        """Create request to add speaker notes."""
-        return {
-            "insertText": {
-                "objectId": f"{slide_id}_notes",
-                "text": notes,
             }
         }
 
