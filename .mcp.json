@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "growthnav": {
+      "command": "uv",
+      "args": ["run", "--package", "growthnav-mcp", "growthnav-mcp"],
+      "description": "GrowthNav Analytics Platform - BigQuery, Reporting, and Conversion tools"
+    }
+  }
+}

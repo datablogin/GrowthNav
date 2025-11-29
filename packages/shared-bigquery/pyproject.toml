@@ -1,0 +1,24 @@
+[project]
+name = "growthnav-bigquery"
+version = "0.1.0"
+description = "Shared BigQuery client with multi-tenant support and customer registry"
+requires-python = ">=3.11"
+dependencies = [
+    "google-cloud-bigquery>=3.13.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "tenacity>=8.0.0",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["growthnav"]

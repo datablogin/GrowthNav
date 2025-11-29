@@ -1,0 +1,21 @@
+[project]
+name = "growthnav-conversions"
+version = "0.1.0"
+description = "Unified conversion tracking across ad platforms and transaction sources"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.0.0",
+    "pandas>=2.0.0",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["growthnav"]
