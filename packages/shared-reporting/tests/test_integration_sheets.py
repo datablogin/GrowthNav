@@ -4,11 +4,12 @@ Real integration tests for Google Sheets exporter.
 These tests hit actual Google Sheets API - no mocks.
 
 Prerequisites:
-- GCP authentication via service account or application default credentials
-- Service account: growthnav-ci@topgolf-460202.iam.gserviceaccount.com
+- GCP authentication via service account with Google Workspace access
+- Set RUN_SHEETS_INTEGRATION_TESTS=1 to enable these tests
 - Permissions: Google Sheets API and Google Drive API enabled
 
-Run with: uv run pytest packages/shared-reporting/tests/test_integration_sheets.py -v
+Run with:
+    RUN_SHEETS_INTEGRATION_TESTS=1 uv run pytest packages/shared-reporting/tests/test_integration_sheets.py -v
 """
 
 import os
@@ -18,11 +19,11 @@ import pandas as pd
 import pytest
 from growthnav.reporting.sheets import SheetsExporter
 
-# Skip all tests in this file if GCP credentials are not available
+# Skip all tests unless explicitly enabled via environment variable
+# These tests require Google Workspace access which service accounts may not have
 pytestmark = pytest.mark.skipif(
-    not os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-    and not os.path.exists(os.path.expanduser("~/.config/gcloud/application_default_credentials.json")),
-    reason="GCP credentials not available"
+    not os.getenv("RUN_SHEETS_INTEGRATION_TESTS"),
+    reason="Set RUN_SHEETS_INTEGRATION_TESTS=1 to run Google Sheets integration tests"
 )
 
 

@@ -4,18 +4,17 @@ Real integration tests for SlidesGenerator.
 These tests hit actual Google Slides API - no mocks.
 
 Prerequisites:
-- GCP service account credentials file
-- Set GOOGLE_APPLICATION_CREDENTIALS to path of service account JSON
-- Service account: growthnav-ci@topgolf-460202.iam.gserviceaccount.com
+- GCP service account credentials with Google Workspace access
+- Set RUN_SLIDES_INTEGRATION_TESTS=1 to enable these tests
 - Required APIs enabled: Google Slides API, Google Drive API
 
-Run with: uv run pytest packages/shared-reporting/tests/test_integration_slides.py -v
+Run with:
+    RUN_SLIDES_INTEGRATION_TESTS=1 uv run pytest packages/shared-reporting/tests/test_integration_slides.py -v
 
-Note: Application default credentials from `gcloud auth application-default login`
-may not have sufficient scopes for Slides API. Use a service account file instead.
+Note: Service accounts need Domain-Wide Delegation or specific Workspace access
+to create Google Slides presentations.
 """
 
-import json
 import os
 
 import pytest
@@ -24,25 +23,11 @@ from googleapiclient.discovery import build
 from growthnav.reporting.slides import SlideContent, SlideLayout, SlidesGenerator
 
 
-def _has_valid_credentials():
-    """Check if valid service account credentials are available."""
-    creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-    if not creds_path or not os.path.exists(creds_path):
-        return False
-
-    # Check if it's a service account (application default creds don't have sufficient scopes)
-    try:
-        with open(creds_path) as f:
-            cred_info = json.load(f)
-        return cred_info.get("type") == "service_account"
-    except Exception:
-        return False
-
-
-# Skip all tests in this file if proper GCP credentials are not available
+# Skip all tests unless explicitly enabled via environment variable
+# These tests require Google Workspace access which service accounts may not have
 pytestmark = pytest.mark.skipif(
-    not _has_valid_credentials(),
-    reason="GCP service account credentials not available. Set GOOGLE_APPLICATION_CREDENTIALS to service account JSON file path.",
+    not os.getenv("RUN_SLIDES_INTEGRATION_TESTS"),
+    reason="Set RUN_SLIDES_INTEGRATION_TESTS=1 to run Google Slides integration tests",
 )
 
 
