@@ -68,6 +68,12 @@ def created_spreadsheets():
                 "https://www.googleapis.com/auth/drive.file",
             ]
 
+            # Get impersonation email (same as SheetsExporter default)
+            impersonate_email = os.getenv(
+                "GROWTHNAV_IMPERSONATE_EMAIL",
+                "access@roimediapartners.com",
+            )
+
             # Check if credentials_path is a service account file
             if credentials_path:
                 # Read the file to determine its type
@@ -75,8 +81,13 @@ def created_spreadsheets():
                     cred_data = json.load(f)
 
                 if cred_data.get("type") == "service_account":
-                    # Use service account credentials
-                    creds = Credentials.from_service_account_file(credentials_path, scopes=scopes)
+                    # Use service account credentials WITH domain-wide delegation
+                    # This ensures we can delete files created by the impersonated user
+                    creds = Credentials.from_service_account_file(
+                        credentials_path,
+                        scopes=scopes,
+                        subject=impersonate_email,
+                    )
                 else:
                     # Not a service account file, use ADC
                     creds, _ = default(scopes=scopes)

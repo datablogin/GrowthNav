@@ -60,10 +60,20 @@ class TestSlidesGeneratorIntegration:
         # Cleanup: delete all created presentations
         if presentation_ids:
             creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+
+            # Get impersonation email (same as SlidesGenerator default)
+            impersonate_email = os.getenv(
+                "GROWTHNAV_IMPERSONATE_EMAIL",
+                "access@roimediapartners.com",
+            )
+
             if creds_path:
+                # Use service account credentials WITH domain-wide delegation
+                # This ensures we can delete files created by the impersonated user
                 creds = Credentials.from_service_account_file(
                     creds_path,
                     scopes=["https://www.googleapis.com/auth/drive.file"],
+                    subject=impersonate_email,
                 )
             else:
                 # Use application default credentials
@@ -381,10 +391,20 @@ class TestCreateFromTemplateIntegration:
         # Cleanup
         if presentation_ids:
             creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+
+            # Get impersonation email (same as SlidesGenerator default)
+            impersonate_email = os.getenv(
+                "GROWTHNAV_IMPERSONATE_EMAIL",
+                "access@roimediapartners.com",
+            )
+
             if creds_path:
+                # Use service account credentials WITH domain-wide delegation
+                # This ensures we can delete files created by the impersonated user
                 creds = Credentials.from_service_account_file(
                     creds_path,
                     scopes=["https://www.googleapis.com/auth/drive.file"],
+                    subject=impersonate_email,
                 )
             else:
                 creds_path = os.path.expanduser(
