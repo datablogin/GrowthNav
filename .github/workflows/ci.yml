@@ -66,10 +66,10 @@ jobs:
       - name: Run tests with coverage
         env:
           GCP_PROJECT_ID: ${{ env.GCP_PROJECT_ID }}
-          # Enable Google Sheets integration tests (requires domain-wide delegation)
-          RUN_SHEETS_INTEGRATION_TESTS: "1"
-          # Enable Google Slides integration tests (requires domain-wide delegation)
-          RUN_SLIDES_INTEGRATION_TESTS: "1"
+          # Only run Google Workspace integration tests on Python 3.11 to avoid rate limits
+          # (60 requests/minute per user - running parallel jobs hits this limit)
+          RUN_SHEETS_INTEGRATION_TESTS: ${{ matrix.python-version == '3.11' && '1' || '' }}
+          RUN_SLIDES_INTEGRATION_TESTS: ${{ matrix.python-version == '3.11' && '1' || '' }}
         run: |
           uv run pytest packages/ \
             --cov=growthnav \
