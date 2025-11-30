@@ -67,6 +67,10 @@ class Conversion:
     Represents a single conversion event that can be attributed
     to one or more ad platforms.
 
+    All timestamps are stored as timezone-aware datetime objects in UTC.
+    This ensures consistency across different data sources and accurate
+    cross-platform attribution (Google Ads, Meta, etc.).
+
     Example:
         conversion = Conversion(
             customer_id="topgolf",
@@ -75,7 +79,7 @@ class Conversion:
             source=ConversionSource.POS,
             value=150.00,
             currency="USD",
-            timestamp=datetime.now(),
+            timestamp=datetime.now(UTC),
         )
     """
 

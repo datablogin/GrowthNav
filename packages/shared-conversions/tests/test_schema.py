@@ -190,6 +190,12 @@ class TestConversion:
 
         assert before <= conversion.timestamp <= after
 
+    def test_timestamp_is_timezone_aware(self):
+        """Ensure all generated timestamps are timezone-aware (UTC)."""
+        conversion = Conversion(customer_id="test")
+        assert conversion.timestamp.tzinfo is not None
+        assert conversion.timestamp.tzinfo == UTC
+
     def test_to_dict_minimal(self):
         """Test serialization with minimal fields."""
         conversion = Conversion(customer_id="test")

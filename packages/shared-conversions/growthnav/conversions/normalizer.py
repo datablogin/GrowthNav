@@ -147,6 +147,7 @@ class POSNormalizer(ConversionNormalizer):
             timestamp = mapped.get("timestamp")
             if timestamp:
                 if isinstance(timestamp, str):
+                    # Replace "Z" (Zulu/UTC indicator) with "+00:00" for fromisoformat()
                     timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
                 elif not isinstance(timestamp, datetime):
                     timestamp = datetime.now(UTC)
@@ -235,6 +236,7 @@ class CRMNormalizer(ConversionNormalizer):
             timestamp = mapped.get("timestamp")
             if timestamp:
                 if isinstance(timestamp, str):
+                    # Replace "Z" (Zulu/UTC indicator) with "+00:00" for fromisoformat()
                     timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
                 elif not isinstance(timestamp, datetime):
                     timestamp = datetime.now(UTC)
@@ -320,6 +322,7 @@ class LoyaltyNormalizer(ConversionNormalizer):
             timestamp = mapped.get("timestamp")
             if timestamp:
                 if isinstance(timestamp, str):
+                    # Replace "Z" (Zulu/UTC indicator) with "+00:00" for fromisoformat()
                     timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
                 elif not isinstance(timestamp, datetime):
                     timestamp = datetime.now(UTC)
