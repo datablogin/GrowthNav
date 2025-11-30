@@ -14,11 +14,14 @@ Run with:
 
 import os
 import time
+from collections.abc import Generator
 from datetime import datetime
 
 import pandas as pd
 import pytest
 from growthnav.reporting.sheets import SheetsExporter
+
+from .conftest import CLEANUP_DELAY, TEST_SHARE_EMAIL, get_cleanup_credentials
 
 # Rate limit delay between tests (seconds)
 # Google Sheets API has limits of 60 read/write requests per minute per user
@@ -28,88 +31,57 @@ RATE_LIMIT_DELAY = 5
 # These tests require Google Workspace access which service accounts may not have
 pytestmark = pytest.mark.skipif(
     not os.getenv("RUN_SHEETS_INTEGRATION_TESTS"),
-    reason="Set RUN_SHEETS_INTEGRATION_TESTS=1 to run Google Sheets integration tests"
+    reason="Set RUN_SHEETS_INTEGRATION_TESTS=1 to run Google Sheets integration tests",
 )
 
 
 @pytest.fixture(autouse=True)
-def rate_limit_delay():
+def rate_limit_delay() -> Generator[None, None, None]:
     """Add delay between tests to avoid rate limiting."""
     yield
     time.sleep(RATE_LIMIT_DELAY)
 
 
 @pytest.fixture
-def exporter():
+def exporter() -> SheetsExporter:
     """Create a SheetsExporter instance."""
     return SheetsExporter()
 
 
 @pytest.fixture
-def created_spreadsheets():
+def created_spreadsheets() -> Generator[list[str], None, None]:
     """Track created spreadsheets for cleanup."""
-    spreadsheet_ids = []
+    spreadsheet_ids: list[str] = []
 
     yield spreadsheet_ids
 
-    # Cleanup: delete all created spreadsheets
+    # Cleanup: delete all created spreadsheets using shared helper
     if spreadsheet_ids:
-        try:
-            import json
+        import gspread
 
-            import gspread
-            from google.auth import default
-            from google.oauth2.service_account import Credentials
+        # Use drive.file scope - that's all we need for deletion
+        creds = get_cleanup_credentials(
+            scopes=["https://www.googleapis.com/auth/drive.file"]
+        )
+        if creds is None:
+            print("Warning: Could not get credentials for cleanup")
+            return
 
-            credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+        client = gspread.authorize(creds)
 
-            scopes = [
-                "https://www.googleapis.com/auth/spreadsheets",
-                "https://www.googleapis.com/auth/drive.file",
-            ]
-
-            # Get impersonation email (same as SheetsExporter default)
-            impersonate_email = os.getenv(
-                "GROWTHNAV_IMPERSONATE_EMAIL",
-                "access@roimediapartners.com",
-            )
-
-            # Check if credentials_path is a service account file
-            if credentials_path:
-                # Read the file to determine its type
-                with open(credentials_path) as f:
-                    cred_data = json.load(f)
-
-                if cred_data.get("type") == "service_account":
-                    # Use service account credentials WITH domain-wide delegation
-                    # This ensures we can delete files created by the impersonated user
-                    creds = Credentials.from_service_account_file(
-                        credentials_path,
-                        scopes=scopes,
-                        subject=impersonate_email,
-                    )
-                else:
-                    # Not a service account file, use ADC
-                    creds, _ = default(scopes=scopes)
-            else:
-                # Use Application Default Credentials
-                creds, _ = default(scopes=scopes)
-
-            client = gspread.authorize(creds)
-
-            for spreadsheet_id in spreadsheet_ids:
-                try:
-                    spreadsheet = client.open_by_key(spreadsheet_id)
-                    client.del_spreadsheet(spreadsheet_id)
-                    print(f"Cleaned up spreadsheet: {spreadsheet.title}")
-                except Exception as e:
-                    print(f"Failed to cleanup spreadsheet {spreadsheet_id}: {e}")
-        except Exception as e:
-            print(f"Failed to initialize cleanup client: {e}")
+        for spreadsheet_id in spreadsheet_ids:
+            try:
+                spreadsheet = client.open_by_key(spreadsheet_id)
+                client.del_spreadsheet(spreadsheet_id)
+                print(f"Cleaned up spreadsheet: {spreadsheet.title}")
+                if spreadsheet_id != spreadsheet_ids[-1]:
+                    time.sleep(CLEANUP_DELAY)
+            except Exception as e:
+                print(f"Failed to cleanup spreadsheet {spreadsheet_id}: {e}")
 
 
 @pytest.fixture
-def sample_dataframe():
+def sample_dataframe() -> pd.DataFrame:
     """Create a sample DataFrame for testing."""
     return pd.DataFrame({
         "customer": ["Topgolf", "ClubCorp", "PGA Tour"],
@@ -120,7 +92,7 @@ def sample_dataframe():
 
 
 @pytest.fixture
-def sample_list_data():
+def sample_list_data() -> list[dict[str, str | float]]:
     """Create sample list of dicts for testing."""
     return [
         {"metric": "CTR", "value": 0.025, "status": "Good"},
@@ -290,15 +262,17 @@ class TestSheetsExporterIntegration:
         assert second_record["conversions"] == 350
 
     @pytest.mark.integration
-    def test_share_with_users(self, exporter, sample_dataframe, created_spreadsheets):
+    def test_share_with_users(
+        self,
+        exporter: SheetsExporter,
+        sample_dataframe: pd.DataFrame,
+        created_spreadsheets: list[str],
+    ) -> None:
         """Test sharing spreadsheet with users."""
-        # Use a test email - service account email should work
-        test_email = "growthnav-ci@topgolf-460202.iam.gserviceaccount.com"
-
         url = exporter.create_dashboard(
             title=f"Integration Test - Sharing - {datetime.now().isoformat()}",
             data=sample_dataframe,
-            share_with=[test_email],
+            share_with=[TEST_SHARE_EMAIL],
         )
 
         # Extract spreadsheet ID
@@ -313,7 +287,7 @@ class TestSheetsExporterIntegration:
 
         # Verify the test email has access
         shared_emails = [p.get("emailAddress") for p in permissions if "emailAddress" in p]
-        assert test_email in shared_emails
+        assert TEST_SHARE_EMAIL in shared_emails
 
     @pytest.mark.integration
     def test_update_existing_sheet(self, exporter, sample_dataframe, created_spreadsheets):

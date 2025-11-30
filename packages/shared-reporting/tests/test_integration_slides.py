@@ -17,11 +17,12 @@ to create Google Slides presentations.
 
 import os
 import time
+from collections.abc import Generator
 
 import pytest
-from google.oauth2.service_account import Credentials
-from googleapiclient.discovery import build
 from growthnav.reporting.slides import SlideContent, SlideLayout, SlidesGenerator
+
+from .conftest import TEST_SHARE_EMAIL, cleanup_drive_files
 
 # Rate limit delay between tests (seconds)
 # Google Slides API has a limit of 60 write requests per minute per user
@@ -37,7 +38,7 @@ pytestmark = pytest.mark.skipif(
 
 
 @pytest.fixture(autouse=True)
-def rate_limit_delay():
+def rate_limit_delay() -> Generator[None, None, None]:
     """Add delay between tests to avoid rate limiting."""
     yield
     time.sleep(RATE_LIMIT_DELAY)
@@ -47,54 +48,18 @@ class TestSlidesGeneratorIntegration:
     """Real integration tests for SlidesGenerator."""
 
     @pytest.fixture
-    def generator(self):
+    def generator(self) -> SlidesGenerator:
         """Create a real SlidesGenerator."""
         return SlidesGenerator()
 
     @pytest.fixture
-    def created_presentations(self) -> list[str]:
+    def created_presentations(self) -> Generator[list[str], None, None]:
         """Track presentation IDs created during tests for cleanup."""
-        presentation_ids = []
+        presentation_ids: list[str] = []
         yield presentation_ids
 
-        # Cleanup: delete all created presentations
-        if presentation_ids:
-            creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-
-            # Get impersonation email (same as SlidesGenerator default)
-            impersonate_email = os.getenv(
-                "GROWTHNAV_IMPERSONATE_EMAIL",
-                "access@roimediapartners.com",
-            )
-
-            if creds_path:
-                # Use service account credentials WITH domain-wide delegation
-                # This ensures we can delete files created by the impersonated user
-                creds = Credentials.from_service_account_file(
-                    creds_path,
-                    scopes=["https://www.googleapis.com/auth/drive.file"],
-                    subject=impersonate_email,
-                )
-            else:
-                # Use application default credentials
-                creds_path = os.path.expanduser(
-                    "~/.config/gcloud/application_default_credentials.json"
-                )
-                if os.path.exists(creds_path):
-                    from google.auth import default
-
-                    creds, _ = default(scopes=["https://www.googleapis.com/auth/drive.file"])
-                else:
-                    return  # Can't cleanup without credentials
-
-            drive_service = build("drive", "v3", credentials=creds)
-
-            for presentation_id in presentation_ids:
-                try:
-                    drive_service.files().delete(fileId=presentation_id).execute()
-                    print(f"Cleaned up presentation: {presentation_id}")
-                except Exception as e:
-                    print(f"Failed to cleanup presentation {presentation_id}: {e}")
+        # Cleanup: delete all created presentations using shared helper
+        cleanup_drive_files(presentation_ids)
 
     def test_create_presentation_returns_url(self, generator, created_presentations):
         """Create a simple presentation and verify URL is returned."""
@@ -222,19 +187,20 @@ class TestSlidesGeneratorIntegration:
         # Presentation should have at least 2 slides (plus initial default slide)
         assert len(presentation["slides"]) >= 2
 
-    def test_share_presentation(self, generator, created_presentations):
+    def test_share_presentation(
+        self,
+        generator: SlidesGenerator,
+        created_presentations: list[str],
+    ) -> None:
         """Test sharing functionality."""
         slides = [
             SlideContent(title="Shared Presentation", body="This will be shared."),
         ]
 
-        # Use a test email address (service account email for testing)
-        test_email = "growthnav-ci@topgolf-460202.iam.gserviceaccount.com"
-
         url = generator.create_presentation(
             title="Integration Test - Sharing",
             slides=slides,
-            share_with=[test_email],
+            share_with=[TEST_SHARE_EMAIL],
         )
 
         # Extract presentation ID for cleanup
@@ -352,12 +318,14 @@ class TestCreateFromTemplateIntegration:
     """Integration tests for template-based presentation creation."""
 
     @pytest.fixture
-    def generator(self):
+    def generator(self) -> SlidesGenerator:
         """Create a real SlidesGenerator."""
         return SlidesGenerator()
 
     @pytest.fixture
-    def template_presentation_id(self, generator) -> str:
+    def template_presentation_id(
+        self, generator: SlidesGenerator
+    ) -> Generator[str, None, None]:
         """Create a template presentation for testing."""
         # Create a simple template with placeholders
         slides = [
@@ -383,52 +351,20 @@ class TestCreateFromTemplateIntegration:
             print(f"Failed to cleanup template {template_id}: {e}")
 
     @pytest.fixture
-    def created_presentations(self) -> list[str]:
+    def created_presentations(self) -> Generator[list[str], None, None]:
         """Track presentation IDs created during tests for cleanup."""
-        presentation_ids = []
+        presentation_ids: list[str] = []
         yield presentation_ids
 
-        # Cleanup
-        if presentation_ids:
-            creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-
-            # Get impersonation email (same as SlidesGenerator default)
-            impersonate_email = os.getenv(
-                "GROWTHNAV_IMPERSONATE_EMAIL",
-                "access@roimediapartners.com",
-            )
-
-            if creds_path:
-                # Use service account credentials WITH domain-wide delegation
-                # This ensures we can delete files created by the impersonated user
-                creds = Credentials.from_service_account_file(
-                    creds_path,
-                    scopes=["https://www.googleapis.com/auth/drive.file"],
-                    subject=impersonate_email,
-                )
-            else:
-                creds_path = os.path.expanduser(
-                    "~/.config/gcloud/application_default_credentials.json"
-                )
-                if os.path.exists(creds_path):
-                    from google.auth import default
-
-                    creds, _ = default(scopes=["https://www.googleapis.com/auth/drive.file"])
-                else:
-                    return
-
-            drive_service = build("drive", "v3", credentials=creds)
-
-            for presentation_id in presentation_ids:
-                try:
-                    drive_service.files().delete(fileId=presentation_id).execute()
-                    print(f"Cleaned up presentation: {presentation_id}")
-                except Exception as e:
-                    print(f"Failed to cleanup presentation {presentation_id}: {e}")
+        # Cleanup using shared helper
+        cleanup_drive_files(presentation_ids)
 
     def test_create_from_template_basic(
-        self, generator, template_presentation_id, created_presentations
-    ):
+        self,
+        generator: SlidesGenerator,
+        template_presentation_id: str,
+        created_presentations: list[str],
+    ) -> None:
         """Test creating presentation from template with replacements."""
         url = generator.create_from_template(
             template_id=template_presentation_id,
@@ -455,16 +391,17 @@ class TestCreateFromTemplateIntegration:
         assert presentation["title"] == "From Template - Test 1"
 
     def test_create_from_template_with_sharing(
-        self, generator, template_presentation_id, created_presentations
-    ):
+        self,
+        generator: SlidesGenerator,
+        template_presentation_id: str,
+        created_presentations: list[str],
+    ) -> None:
         """Test creating from template with sharing."""
-        test_email = "growthnav-ci@topgolf-460202.iam.gserviceaccount.com"
-
         url = generator.create_from_template(
             template_id=template_presentation_id,
             title="From Template - Shared",
             replacements={"company_name": "Test Co"},
-            share_with=[test_email],
+            share_with=[TEST_SHARE_EMAIL],
         )
 
         # Extract presentation ID for cleanup
