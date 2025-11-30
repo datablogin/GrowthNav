@@ -1,6 +1,6 @@
 """Tests for CustomerRegistry."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
@@ -71,7 +71,7 @@ class TestCustomer:
 
     def test_customer_with_all_fields(self):
         """Test Customer with all fields populated."""
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         customer = Customer(
             customer_id="topgolf",
             customer_name="TopGolf",

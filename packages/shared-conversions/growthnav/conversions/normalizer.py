@@ -10,7 +10,7 @@ Each normalizer handles a specific data source:
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 import pandas as pd
@@ -149,9 +149,9 @@ class POSNormalizer(ConversionNormalizer):
                 if isinstance(timestamp, str):
                     timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
                 elif not isinstance(timestamp, datetime):
-                    timestamp = datetime.utcnow()
+                    timestamp = datetime.now(UTC)
             else:
-                timestamp = datetime.utcnow()
+                timestamp = datetime.now(UTC)
 
             conversion = Conversion(
                 customer_id=self.customer_id,
@@ -237,9 +237,9 @@ class CRMNormalizer(ConversionNormalizer):
                 if isinstance(timestamp, str):
                     timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
                 elif not isinstance(timestamp, datetime):
-                    timestamp = datetime.utcnow()
+                    timestamp = datetime.now(UTC)
             else:
-                timestamp = datetime.utcnow()
+                timestamp = datetime.now(UTC)
 
             conversion = Conversion(
                 customer_id=self.customer_id,
@@ -322,9 +322,9 @@ class LoyaltyNormalizer(ConversionNormalizer):
                 if isinstance(timestamp, str):
                     timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
                 elif not isinstance(timestamp, datetime):
-                    timestamp = datetime.utcnow()
+                    timestamp = datetime.now(UTC)
             else:
-                timestamp = datetime.utcnow()
+                timestamp = datetime.now(UTC)
 
             conversion = Conversion(
                 customer_id=self.customer_id,

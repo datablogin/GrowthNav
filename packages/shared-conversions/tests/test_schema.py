@@ -1,6 +1,6 @@
 """Tests for conversion schema (Conversion, enums)."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 from uuid import UUID
 
 from growthnav.conversions.schema import (
@@ -184,9 +184,9 @@ class TestConversion:
 
     def test_auto_generated_timestamp(self):
         """Test that timestamp is auto-generated."""
-        before = datetime.utcnow()
+        before = datetime.now(UTC)
         conversion = Conversion(customer_id="test")
-        after = datetime.utcnow()
+        after = datetime.now(UTC)
 
         assert before <= conversion.timestamp <= after
 
@@ -397,9 +397,9 @@ class TestConversion:
             "customer_id": "test",
         }
 
-        before = datetime.utcnow()
+        before = datetime.now(UTC)
         conversion = Conversion.from_dict(data)
-        after = datetime.utcnow()
+        after = datetime.now(UTC)
 
         assert before <= conversion.timestamp <= after
 
