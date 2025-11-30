@@ -15,10 +15,14 @@ Note: Service accounts need Domain-Wide Delegation or specific Workspace access
 to create Google Slides presentations.
 """
 
+import json
 import os
 import time
+from collections.abc import Generator
 
 import pytest
+from google.auth import default
+from google.auth.exceptions import DefaultCredentialsError
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from growthnav.reporting.slides import SlideContent, SlideLayout, SlidesGenerator
@@ -27,6 +31,70 @@ from growthnav.reporting.slides import SlideContent, SlideLayout, SlidesGenerato
 # Google Slides API has a limit of 60 write requests per minute per user
 # Each slide creation involves multiple API calls (create, get, batchUpdate)
 RATE_LIMIT_DELAY = 5
+
+# Delay between cleanup operations to avoid rate limits
+# Using 1.0 second to stay safely within 60 requests/minute limit
+CLEANUP_DELAY = 1.0
+
+# Environment variable for test sharing email
+TEST_SHARE_EMAIL = os.getenv(
+    "GROWTHNAV_TEST_SHARE_EMAIL",
+    "growthnav-ci@topgolf-460202.iam.gserviceaccount.com",
+)
+
+# Default impersonation email for domain-wide delegation
+DEFAULT_IMPERSONATE_EMAIL = os.getenv(
+    "GROWTHNAV_IMPERSONATE_EMAIL",
+    "access@roimediapartners.com",
+)
+
+
+def get_cleanup_credentials() -> Credentials | None:
+    """Get credentials for test cleanup with domain-wide delegation."""
+    scopes = ["https://www.googleapis.com/auth/drive.file"]
+    credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+
+    if credentials_path:
+        try:
+            with open(credentials_path) as f:
+                cred_data = json.load(f)
+
+            if cred_data.get("type") == "service_account":
+                return Credentials.from_service_account_file(
+                    credentials_path,
+                    scopes=scopes,
+                    subject=DEFAULT_IMPERSONATE_EMAIL,
+                )
+        except (OSError, json.JSONDecodeError) as e:
+            print(f"Warning: Could not load credentials from file: {e}")
+
+    try:
+        creds, _ = default(scopes=scopes)
+        return creds
+    except DefaultCredentialsError:
+        return None
+
+
+def cleanup_drive_files(file_ids: list[str]) -> None:
+    """Clean up files from Google Drive with rate limiting."""
+    if not file_ids:
+        return
+
+    credentials = get_cleanup_credentials()
+    if credentials is None:
+        print("Warning: Could not get credentials for cleanup")
+        return
+
+    drive_service = build("drive", "v3", credentials=credentials)
+
+    for file_id in file_ids:
+        try:
+            drive_service.files().delete(fileId=file_id).execute()
+            print(f"Cleaned up file: {file_id}")
+            if file_id != file_ids[-1]:
+                time.sleep(CLEANUP_DELAY)
+        except Exception as e:
+            print(f"Failed to cleanup file {file_id}: {e}")
 
 # Skip all tests unless explicitly enabled via environment variable
 # These tests require Google Workspace access which service accounts may not have
@@ -37,7 +105,7 @@ pytestmark = pytest.mark.skipif(
 
 
 @pytest.fixture(autouse=True)
-def rate_limit_delay():
+def rate_limit_delay() -> Generator[None, None, None]:
     """Add delay between tests to avoid rate limiting."""
     yield
     time.sleep(RATE_LIMIT_DELAY)
@@ -47,44 +115,18 @@ class TestSlidesGeneratorIntegration:
     """Real integration tests for SlidesGenerator."""
 
     @pytest.fixture
-    def generator(self):
+    def generator(self) -> SlidesGenerator:
         """Create a real SlidesGenerator."""
         return SlidesGenerator()
 
     @pytest.fixture
-    def created_presentations(self) -> list[str]:
+    def created_presentations(self) -> Generator[list[str], None, None]:
         """Track presentation IDs created during tests for cleanup."""
-        presentation_ids = []
+        presentation_ids: list[str] = []
         yield presentation_ids
 
-        # Cleanup: delete all created presentations
-        if presentation_ids:
-            creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-            if creds_path:
-                creds = Credentials.from_service_account_file(
-                    creds_path,
-                    scopes=["https://www.googleapis.com/auth/drive.file"],
-                )
-            else:
-                # Use application default credentials
-                creds_path = os.path.expanduser(
-                    "~/.config/gcloud/application_default_credentials.json"
-                )
-                if os.path.exists(creds_path):
-                    from google.auth import default
-
-                    creds, _ = default(scopes=["https://www.googleapis.com/auth/drive.file"])
-                else:
-                    return  # Can't cleanup without credentials
-
-            drive_service = build("drive", "v3", credentials=creds)
-
-            for presentation_id in presentation_ids:
-                try:
-                    drive_service.files().delete(fileId=presentation_id).execute()
-                    print(f"Cleaned up presentation: {presentation_id}")
-                except Exception as e:
-                    print(f"Failed to cleanup presentation {presentation_id}: {e}")
+        # Cleanup: delete all created presentations using shared helper
+        cleanup_drive_files(presentation_ids)
 
     def test_create_presentation_returns_url(self, generator, created_presentations):
         """Create a simple presentation and verify URL is returned."""
@@ -212,19 +254,20 @@ class TestSlidesGeneratorIntegration:
         # Presentation should have at least 2 slides (plus initial default slide)
         assert len(presentation["slides"]) >= 2
 
-    def test_share_presentation(self, generator, created_presentations):
+    def test_share_presentation(
+        self,
+        generator: SlidesGenerator,
+        created_presentations: list[str],
+    ) -> None:
         """Test sharing functionality."""
         slides = [
             SlideContent(title="Shared Presentation", body="This will be shared."),
         ]
 
-        # Use a test email address (service account email for testing)
-        test_email = "growthnav-ci@topgolf-460202.iam.gserviceaccount.com"
-
         url = generator.create_presentation(
             title="Integration Test - Sharing",
             slides=slides,
-            share_with=[test_email],
+            share_with=[TEST_SHARE_EMAIL],
         )
 
         # Extract presentation ID for cleanup
@@ -342,12 +385,14 @@ class TestCreateFromTemplateIntegration:
     """Integration tests for template-based presentation creation."""
 
     @pytest.fixture
-    def generator(self):
+    def generator(self) -> SlidesGenerator:
         """Create a real SlidesGenerator."""
         return SlidesGenerator()
 
     @pytest.fixture
-    def template_presentation_id(self, generator) -> str:
+    def template_presentation_id(
+        self, generator: SlidesGenerator
+    ) -> Generator[str, None, None]:
         """Create a template presentation for testing."""
         # Create a simple template with placeholders
         slides = [
@@ -373,42 +418,20 @@ class TestCreateFromTemplateIntegration:
             print(f"Failed to cleanup template {template_id}: {e}")
 
     @pytest.fixture
-    def created_presentations(self) -> list[str]:
+    def created_presentations(self) -> Generator[list[str], None, None]:
         """Track presentation IDs created during tests for cleanup."""
-        presentation_ids = []
+        presentation_ids: list[str] = []
         yield presentation_ids
 
-        # Cleanup
-        if presentation_ids:
-            creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-            if creds_path:
-                creds = Credentials.from_service_account_file(
-                    creds_path,
-                    scopes=["https://www.googleapis.com/auth/drive.file"],
-                )
-            else:
-                creds_path = os.path.expanduser(
-                    "~/.config/gcloud/application_default_credentials.json"
-                )
-                if os.path.exists(creds_path):
-                    from google.auth import default
-
-                    creds, _ = default(scopes=["https://www.googleapis.com/auth/drive.file"])
-                else:
-                    return
-
-            drive_service = build("drive", "v3", credentials=creds)
-
-            for presentation_id in presentation_ids:
-                try:
-                    drive_service.files().delete(fileId=presentation_id).execute()
-                    print(f"Cleaned up presentation: {presentation_id}")
-                except Exception as e:
-                    print(f"Failed to cleanup presentation {presentation_id}: {e}")
+        # Cleanup using shared helper
+        cleanup_drive_files(presentation_ids)
 
     def test_create_from_template_basic(
-        self, generator, template_presentation_id, created_presentations
-    ):
+        self,
+        generator: SlidesGenerator,
+        template_presentation_id: str,
+        created_presentations: list[str],
+    ) -> None:
         """Test creating presentation from template with replacements."""
         url = generator.create_from_template(
             template_id=template_presentation_id,
@@ -435,16 +458,17 @@ class TestCreateFromTemplateIntegration:
         assert presentation["title"] == "From Template - Test 1"
 
     def test_create_from_template_with_sharing(
-        self, generator, template_presentation_id, created_presentations
-    ):
+        self,
+        generator: SlidesGenerator,
+        template_presentation_id: str,
+        created_presentations: list[str],
+    ) -> None:
         """Test creating from template with sharing."""
-        test_email = "growthnav-ci@topgolf-460202.iam.gserviceaccount.com"
-
         url = generator.create_from_template(
             template_id=template_presentation_id,
             title="From Template - Shared",
             replacements={"company_name": "Test Co"},
-            share_with=[test_email],
+            share_with=[TEST_SHARE_EMAIL],
         )
 
         # Extract presentation ID for cleanup
