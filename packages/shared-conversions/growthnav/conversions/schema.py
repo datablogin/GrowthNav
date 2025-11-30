@@ -16,7 +16,7 @@ The unified schema enables:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 from uuid import UUID, uuid4
@@ -67,6 +67,10 @@ class Conversion:
     Represents a single conversion event that can be attributed
     to one or more ad platforms.
 
+    All timestamps are stored as timezone-aware datetime objects in UTC.
+    This ensures consistency across different data sources and accurate
+    cross-platform attribution (Google Ads, Meta, etc.).
+
     Example:
         conversion = Conversion(
             customer_id="topgolf",
@@ -75,7 +79,7 @@ class Conversion:
             source=ConversionSource.POS,
             value=150.00,
             currency="USD",
-            timestamp=datetime.now(),
+            timestamp=datetime.now(UTC),
         )
     """
 
@@ -90,7 +94,7 @@ class Conversion:
     # Conversion details
     conversion_type: ConversionType = ConversionType.PURCHASE
     source: ConversionSource = ConversionSource.POS
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     # Value
     value: float = 0.0
@@ -167,7 +171,7 @@ class Conversion:
             conversion_id=UUID(data["conversion_id"]) if data.get("conversion_id") else uuid4(),
             conversion_type=ConversionType(data.get("conversion_type", "purchase")),
             source=ConversionSource(data.get("source", "pos")),
-            timestamp=datetime.fromisoformat(data["timestamp"]) if isinstance(data.get("timestamp"), str) else data.get("timestamp", datetime.utcnow()),
+            timestamp=datetime.fromisoformat(data["timestamp"]) if isinstance(data.get("timestamp"), str) else data.get("timestamp", datetime.now(UTC)),
             value=float(data.get("value", 0)),
             currency=data.get("currency", "USD"),
             quantity=int(data.get("quantity", 1)),

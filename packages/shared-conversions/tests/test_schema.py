@@ -1,6 +1,6 @@
 """Tests for conversion schema (Conversion, enums)."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 from uuid import UUID
 
 from growthnav.conversions.schema import (
@@ -184,11 +184,17 @@ class TestConversion:
 
     def test_auto_generated_timestamp(self):
         """Test that timestamp is auto-generated."""
-        before = datetime.utcnow()
+        before = datetime.now(UTC)
         conversion = Conversion(customer_id="test")
-        after = datetime.utcnow()
+        after = datetime.now(UTC)
 
         assert before <= conversion.timestamp <= after
+
+    def test_timestamp_is_timezone_aware(self):
+        """Ensure all generated timestamps are timezone-aware (UTC)."""
+        conversion = Conversion(customer_id="test")
+        assert conversion.timestamp.tzinfo is not None
+        assert conversion.timestamp.tzinfo == UTC
 
     def test_to_dict_minimal(self):
         """Test serialization with minimal fields."""
@@ -397,9 +403,9 @@ class TestConversion:
             "customer_id": "test",
         }
 
-        before = datetime.utcnow()
+        before = datetime.now(UTC)
         conversion = Conversion.from_dict(data)
-        after = datetime.utcnow()
+        after = datetime.now(UTC)
 
         assert before <= conversion.timestamp <= after
 

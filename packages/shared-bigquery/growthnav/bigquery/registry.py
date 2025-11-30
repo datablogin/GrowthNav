@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from functools import lru_cache
 from typing import Any
@@ -181,7 +181,7 @@ class CustomerRegistry:
         Returns:
             Customer with updated timestamps
         """
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         row = {
             "customer_id": customer.customer_id,
             "customer_name": customer.customer_name,
