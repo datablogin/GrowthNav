@@ -83,6 +83,13 @@ check_dependencies() {
 
 check_dependencies
 
+# Verify script is run from repository root
+if [ ! -f "pyproject.toml" ] || [ ! -d "packages" ]; then
+    echo -e "${RED}Error: Must be run from GrowthNav repository root${NC}"
+    echo "Expected to find pyproject.toml and packages/ directory"
+    exit 1
+fi
+
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
     case $1 in

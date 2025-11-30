@@ -22,6 +22,7 @@ import gspread
 import pandas as pd
 import pytest
 from google.auth import default
+from google.auth.exceptions import DefaultCredentialsError
 from google.oauth2.service_account import Credentials
 from growthnav.reporting.sheets import SheetsExporter
 
@@ -30,7 +31,8 @@ from growthnav.reporting.sheets import SheetsExporter
 RATE_LIMIT_DELAY = 5
 
 # Delay between cleanup operations to avoid rate limits
-CLEANUP_DELAY = 0.5
+# Using 1.0 second to stay safely within 60 requests/minute limit
+CLEANUP_DELAY = 1.0
 
 # Environment variable for test sharing email
 TEST_SHARE_EMAIL = os.getenv(
@@ -65,13 +67,13 @@ def get_cleanup_credentials(
                     scopes=scopes,
                     subject=DEFAULT_IMPERSONATE_EMAIL,
                 )
-        except (OSError, json.JSONDecodeError):
-            pass
+        except (OSError, json.JSONDecodeError) as e:
+            print(f"Warning: Could not load credentials from file: {e}")
 
     try:
         creds, _ = default(scopes=scopes)
         return creds
-    except Exception:
+    except DefaultCredentialsError:
         return None
 
 # Skip all tests unless explicitly enabled via environment variable
