@@ -12,20 +12,67 @@ Run with:
     RUN_SHEETS_INTEGRATION_TESTS=1 uv run pytest packages/shared-reporting/tests/test_integration_sheets.py -v
 """
 
+import json
 import os
 import time
 from collections.abc import Generator
 from datetime import datetime
 
+import gspread
 import pandas as pd
 import pytest
+from google.auth import default
+from google.oauth2.service_account import Credentials
 from growthnav.reporting.sheets import SheetsExporter
-
-from .conftest import CLEANUP_DELAY, TEST_SHARE_EMAIL, get_cleanup_credentials
 
 # Rate limit delay between tests (seconds)
 # Google Sheets API has limits of 60 read/write requests per minute per user
 RATE_LIMIT_DELAY = 5
+
+# Delay between cleanup operations to avoid rate limits
+CLEANUP_DELAY = 0.5
+
+# Environment variable for test sharing email
+TEST_SHARE_EMAIL = os.getenv(
+    "GROWTHNAV_TEST_SHARE_EMAIL",
+    "growthnav-ci@topgolf-460202.iam.gserviceaccount.com",
+)
+
+# Default impersonation email for domain-wide delegation
+DEFAULT_IMPERSONATE_EMAIL = os.getenv(
+    "GROWTHNAV_IMPERSONATE_EMAIL",
+    "access@roimediapartners.com",
+)
+
+
+def get_cleanup_credentials(
+    scopes: list[str] | None = None,
+) -> Credentials | None:
+    """Get credentials for test cleanup with domain-wide delegation."""
+    if scopes is None:
+        scopes = ["https://www.googleapis.com/auth/drive.file"]
+
+    credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+
+    if credentials_path:
+        try:
+            with open(credentials_path) as f:
+                cred_data = json.load(f)
+
+            if cred_data.get("type") == "service_account":
+                return Credentials.from_service_account_file(
+                    credentials_path,
+                    scopes=scopes,
+                    subject=DEFAULT_IMPERSONATE_EMAIL,
+                )
+        except (OSError, json.JSONDecodeError):
+            pass
+
+    try:
+        creds, _ = default(scopes=scopes)
+        return creds
+    except Exception:
+        return None
 
 # Skip all tests unless explicitly enabled via environment variable
 # These tests require Google Workspace access which service accounts may not have
@@ -55,14 +102,9 @@ def created_spreadsheets() -> Generator[list[str], None, None]:
 
     yield spreadsheet_ids
 
-    # Cleanup: delete all created spreadsheets using shared helper
+    # Cleanup: delete all created spreadsheets
     if spreadsheet_ids:
-        import gspread
-
-        # Use drive.file scope - that's all we need for deletion
-        creds = get_cleanup_credentials(
-            scopes=["https://www.googleapis.com/auth/drive.file"]
-        )
+        creds = get_cleanup_credentials()
         if creds is None:
             print("Warning: Could not get credentials for cleanup")
             return

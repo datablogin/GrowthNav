@@ -15,19 +15,84 @@ Note: Service accounts need Domain-Wide Delegation or specific Workspace access
 to create Google Slides presentations.
 """
 
+import json
 import os
 import time
 from collections.abc import Generator
 
 import pytest
+from google.auth import default
+from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build
 from growthnav.reporting.slides import SlideContent, SlideLayout, SlidesGenerator
-
-from .conftest import TEST_SHARE_EMAIL, cleanup_drive_files
 
 # Rate limit delay between tests (seconds)
 # Google Slides API has a limit of 60 write requests per minute per user
 # Each slide creation involves multiple API calls (create, get, batchUpdate)
 RATE_LIMIT_DELAY = 5
+
+# Delay between cleanup operations to avoid rate limits
+CLEANUP_DELAY = 0.5
+
+# Environment variable for test sharing email
+TEST_SHARE_EMAIL = os.getenv(
+    "GROWTHNAV_TEST_SHARE_EMAIL",
+    "growthnav-ci@topgolf-460202.iam.gserviceaccount.com",
+)
+
+# Default impersonation email for domain-wide delegation
+DEFAULT_IMPERSONATE_EMAIL = os.getenv(
+    "GROWTHNAV_IMPERSONATE_EMAIL",
+    "access@roimediapartners.com",
+)
+
+
+def get_cleanup_credentials() -> Credentials | None:
+    """Get credentials for test cleanup with domain-wide delegation."""
+    scopes = ["https://www.googleapis.com/auth/drive.file"]
+    credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+
+    if credentials_path:
+        try:
+            with open(credentials_path) as f:
+                cred_data = json.load(f)
+
+            if cred_data.get("type") == "service_account":
+                return Credentials.from_service_account_file(
+                    credentials_path,
+                    scopes=scopes,
+                    subject=DEFAULT_IMPERSONATE_EMAIL,
+                )
+        except (OSError, json.JSONDecodeError):
+            pass
+
+    try:
+        creds, _ = default(scopes=scopes)
+        return creds
+    except Exception:
+        return None
+
+
+def cleanup_drive_files(file_ids: list[str]) -> None:
+    """Clean up files from Google Drive with rate limiting."""
+    if not file_ids:
+        return
+
+    credentials = get_cleanup_credentials()
+    if credentials is None:
+        print("Warning: Could not get credentials for cleanup")
+        return
+
+    drive_service = build("drive", "v3", credentials=credentials)
+
+    for file_id in file_ids:
+        try:
+            drive_service.files().delete(fileId=file_id).execute()
+            print(f"Cleaned up file: {file_id}")
+            if file_id != file_ids[-1]:
+                time.sleep(CLEANUP_DELAY)
+        except Exception as e:
+            print(f"Failed to cleanup file {file_id}: {e}")
 
 # Skip all tests unless explicitly enabled via environment variable
 # These tests require Google Workspace access which service accounts may not have
