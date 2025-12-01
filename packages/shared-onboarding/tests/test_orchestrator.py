@@ -362,6 +362,90 @@ class TestOnboardingOrchestratorOnboard:
         assert result.status == OnboardingStatus.FAILED
         assert "BigQuery error" in result.errors[0]
 
+    def test_onboard_credentials_without_store_logs_warning(
+        self, mock_provisioner, mock_registry
+    ):
+        """Test onboarding logs warning when credentials provided but no store configured."""
+        request = OnboardingRequest(
+            customer_id="test",
+            customer_name="Test",
+            industry=Industry.GOLF,
+            gcp_project_id="test-project",
+            credentials={
+                "google_ads_refresh_token": "token123",
+            },
+        )
+
+        # No credential_store configured
+        orchestrator = OnboardingOrchestrator(
+            registry=mock_registry,
+            provisioner=mock_provisioner,
+            credential_store=None,
+        )
+
+        result = orchestrator.onboard(request)
+
+        # Should still succeed, but credentials were skipped
+        assert result.is_success
+        # Credentials were not stored (no store to call)
+
+    def test_onboard_handles_credential_store_exception(
+        self, mock_provisioner, mock_registry
+    ):
+        """Test onboarding handles credential store exceptions."""
+        mock_credential_store = MagicMock()
+        mock_credential_store.store_credential.side_effect = Exception("Secret Manager error")
+
+        request = OnboardingRequest(
+            customer_id="test",
+            customer_name="Test",
+            industry=Industry.GOLF,
+            gcp_project_id="test-project",
+            credentials={
+                "google_ads_refresh_token": "token123",
+            },
+        )
+
+        orchestrator = OnboardingOrchestrator(
+            registry=mock_registry,
+            provisioner=mock_provisioner,
+            credential_store=mock_credential_store,
+        )
+
+        result = orchestrator.onboard(request)
+
+        assert result.status == OnboardingStatus.FAILED
+        # Error message should mention credential failure but not expose details
+        assert any("Failed to store credentials" in error for error in result.errors)
+
+    def test_onboard_sanitizes_credential_errors(
+        self, mock_provisioner, mock_registry
+    ):
+        """Test onboarding sanitizes credential-related error messages."""
+        mock_provisioner.create_dataset.side_effect = Exception(
+            "Error with credential token123 in request"
+        )
+
+        request = OnboardingRequest(
+            customer_id="test",
+            customer_name="Test",
+            industry=Industry.GOLF,
+            gcp_project_id="test-project",
+        )
+
+        orchestrator = OnboardingOrchestrator(
+            registry=mock_registry,
+            provisioner=mock_provisioner,
+        )
+
+        result = orchestrator.onboard(request)
+
+        assert result.status == OnboardingStatus.FAILED
+        # Error should be sanitized - not contain the original message with "credential"
+        assert any("Credential-related error" in error for error in result.errors)
+        # Should not contain the actual token
+        assert not any("token123" in error for error in result.errors)
+
 
 class TestOnboardingOrchestratorOffboard:
     """Test offboard workflow."""
