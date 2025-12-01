@@ -103,6 +103,24 @@ class DatasetProvisioner:
         """Get the fully qualified dataset ID."""
         return f"{self.config.project_id}.{self._get_dataset_id(customer_id)}"
 
+    def _sanitize_label_value(self, value: str, max_length: int = 63) -> str:
+        """Sanitize a string for use as a GCP label value.
+
+        GCP labels must match [a-z0-9_-]{1,63} pattern.
+
+        Args:
+            value: The value to sanitize.
+            max_length: Maximum length for the label (default: 63).
+
+        Returns:
+            Sanitized label value.
+        """
+        # Convert to lowercase and replace underscores with hyphens
+        sanitized = value.lower().replace("_", "-")
+        # Remove any characters that aren't lowercase letters, numbers, or hyphens
+        sanitized = "".join(c for c in sanitized if c.isalnum() or c == "-")
+        return sanitized[:max_length]
+
     def create_dataset(self, customer_id: str) -> str:
         """Create a new dataset for a customer.
 
@@ -126,9 +144,9 @@ class DatasetProvisioner:
         dataset = bigquery.Dataset(full_dataset_id)
         dataset.location = self.config.location
 
-        # Apply labels
+        # Apply labels (sanitized for GCP compatibility)
         labels = dict(self.config.labels)
-        labels["customer_id"] = customer_id
+        labels["customer_id"] = self._sanitize_label_value(customer_id)
         dataset.labels = labels
 
         # Set table expiration if configured

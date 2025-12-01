@@ -247,15 +247,32 @@ class OnboardingOrchestrator:
             logger.info(f"Registered customer: {request.customer_id}")
 
             # Step 5: Store credentials (if provided and store is configured)
-            if request.credentials and self.credential_store:
-                result.status = OnboardingStatus.STORING_CREDENTIALS
-                for cred_type, cred_value in request.credentials.items():
-                    self.credential_store.store_credential(
-                        customer_id=request.customer_id,
-                        credential_type=cred_type,
-                        credential_value=cred_value,
+            if request.credentials:
+                if not self.credential_store:
+                    logger.warning(
+                        f"Skipping {len(request.credentials)} credentials for {request.customer_id}: "
+                        "credential store not configured"
                     )
-                logger.info(f"Stored {len(request.credentials)} credentials for {request.customer_id}")
+                else:
+                    result.status = OnboardingStatus.STORING_CREDENTIALS
+                    try:
+                        for cred_type, cred_value in request.credentials.items():
+                            self.credential_store.store_credential(
+                                customer_id=request.customer_id,
+                                credential_type=cred_type,
+                                credential_value=cred_value,
+                            )
+                        logger.info(f"Stored {len(request.credentials)} credentials for {request.customer_id}")
+                    except Exception as cred_error:
+                        # Handle credential storage errors separately to avoid logging credentials
+                        result.status = OnboardingStatus.FAILED
+                        result.errors.append(f"Failed to store credentials: {type(cred_error).__name__}")
+                        result.completed_at = datetime.now(UTC)
+                        logger.exception(
+                            "Credential storage failed",
+                            extra={"customer_id": request.customer_id}
+                        )
+                        return result
 
             # Success
             result.status = OnboardingStatus.COMPLETED
@@ -268,9 +285,16 @@ class OnboardingOrchestrator:
 
         except Exception as e:
             result.status = OnboardingStatus.FAILED
-            result.errors.append(str(e))
+            # Sanitize error message to avoid logging credentials
+            error_msg = str(e)
+            if "credential" in error_msg.lower():
+                error_msg = f"{type(e).__name__}: Credential-related error (details redacted)"
+            result.errors.append(error_msg)
             result.completed_at = datetime.now(UTC)
-            logger.exception(f"Onboarding failed for {request.customer_id}: {e}")
+            logger.exception(
+                f"Onboarding failed for {request.customer_id}",
+                extra={"sanitized_error": error_msg}
+            )
             return result
 
     def offboard(self, customer_id: str, delete_data: bool = False) -> bool:

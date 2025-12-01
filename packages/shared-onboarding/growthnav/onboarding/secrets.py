@@ -124,6 +124,24 @@ class CredentialStore:
         """
         return f"projects/{self.config.project_id}"
 
+    def _sanitize_label_value(self, value: str, max_length: int = 63) -> str:
+        """Sanitize a string for use as a GCP label value.
+
+        GCP labels must match [a-z0-9_-]{1,63} pattern.
+
+        Args:
+            value: The value to sanitize.
+            max_length: Maximum length for the label (default: 63).
+
+        Returns:
+            Sanitized label value.
+        """
+        # Convert to lowercase and replace underscores with hyphens
+        sanitized = value.lower().replace("_", "-")
+        # Remove any characters that aren't lowercase letters, numbers, or hyphens
+        sanitized = "".join(c for c in sanitized if c.isalnum() or c == "-")
+        return sanitized[:max_length]
+
     def store_credential(
         self,
         customer_id: str,
@@ -163,8 +181,8 @@ class CredentialStore:
                     "secret": {
                         "replication": {"automatic": {}},
                         "labels": {
-                            "customer_id": customer_id.replace("_", "-")[:63],
-                            "credential_type": credential_type.replace("_", "-")[:63],
+                            "customer_id": self._sanitize_label_value(customer_id),
+                            "credential_type": self._sanitize_label_value(credential_type),
                             "managed_by": "growthnav",
                         },
                     },

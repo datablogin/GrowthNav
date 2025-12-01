@@ -6,7 +6,6 @@ requires-python = ">=3.11"
 dependencies = [
     "growthnav-bigquery",
     "google-cloud-secret-manager>=2.16.0",
-    "pydantic>=2.0.0",
 ]
 
 [project.optional-dependencies]

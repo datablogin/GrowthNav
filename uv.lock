@@ -1022,7 +1022,6 @@ source = { editable = "packages/shared-onboarding" }
 dependencies = [
     { name = "google-cloud-secret-manager" },
     { name = "growthnav-bigquery" },
-    { name = "pydantic" },
 ]
 
 [package.optional-dependencies]
@@ -1035,7 +1034,6 @@ test = [
 requires-dist = [
     { name = "google-cloud-secret-manager", specifier = ">=2.16.0" },
     { name = "growthnav-bigquery", editable = "packages/shared-bigquery" },
-    { name = "pydantic", specifier = ">=2.0.0" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8.0.0" },
     { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=0.23.0" },
 ]

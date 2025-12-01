@@ -164,7 +164,8 @@ class TestDatasetProvisionerCreateDataset:
         dataset = call_args[0][0]
         assert dataset.location == "US"
         assert "customer_id" in dataset.labels
-        assert dataset.labels["customer_id"] == "test_customer"
+        # Label value is sanitized (underscores converted to hyphens, lowercase)
+        assert dataset.labels["customer_id"] == "test-customer"
 
     def test_create_dataset_with_exists_ok(self, config, mock_bq_client):
         """Test create_dataset uses exists_ok=True."""
