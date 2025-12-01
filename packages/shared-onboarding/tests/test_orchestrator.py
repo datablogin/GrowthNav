@@ -446,6 +446,63 @@ class TestOnboardingOrchestratorOnboard:
         # Should not contain the actual token
         assert not any("token123" in error for error in result.errors)
 
+    def test_onboard_rollback_on_registry_failure(
+        self, mock_provisioner, mock_registry
+    ):
+        """Test that dataset is rolled back when registry fails after creation."""
+        # Dataset creation succeeds
+        mock_provisioner.create_dataset.return_value = "test-project.growthnav_test"
+        # Registry fails
+        mock_registry.add_customer.side_effect = Exception("Registry unavailable")
+
+        request = OnboardingRequest(
+            customer_id="test",
+            customer_name="Test",
+            industry=Industry.GOLF,
+            gcp_project_id="test-project",
+        )
+
+        orchestrator = OnboardingOrchestrator(
+            registry=mock_registry,
+            provisioner=mock_provisioner,
+        )
+
+        result = orchestrator.onboard(request)
+
+        assert result.status == OnboardingStatus.FAILED
+        assert "Registry unavailable" in result.errors[0]
+        # Dataset should have been rolled back
+        mock_provisioner.delete_dataset.assert_called_once_with("test", delete_contents=True)
+
+    def test_onboard_rollback_failure_logs_error(
+        self, mock_provisioner, mock_registry
+    ):
+        """Test that rollback failure is logged but doesn't raise."""
+        # Dataset creation succeeds
+        mock_provisioner.create_dataset.return_value = "test-project.growthnav_test"
+        # Registry fails
+        mock_registry.add_customer.side_effect = Exception("Registry unavailable")
+        # Rollback also fails
+        mock_provisioner.delete_dataset.side_effect = Exception("Delete failed")
+
+        request = OnboardingRequest(
+            customer_id="test",
+            customer_name="Test",
+            industry=Industry.GOLF,
+            gcp_project_id="test-project",
+        )
+
+        orchestrator = OnboardingOrchestrator(
+            registry=mock_registry,
+            provisioner=mock_provisioner,
+        )
+
+        # Should not raise even if rollback fails
+        result = orchestrator.onboard(request)
+
+        assert result.status == OnboardingStatus.FAILED
+        mock_provisioner.delete_dataset.assert_called_once()
+
 
 class TestOnboardingOrchestratorOffboard:
     """Test offboard workflow."""

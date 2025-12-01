@@ -295,6 +295,21 @@ class OnboardingOrchestrator:
                 f"Onboarding failed for {request.customer_id}",
                 extra={"sanitized_error": error_msg}
             )
+
+            # Rollback: Delete dataset if it was created but subsequent steps failed
+            if result.dataset_id and self.provisioner:
+                try:
+                    logger.warning(
+                        f"Rolling back dataset creation for {request.customer_id}: {result.dataset_id}"
+                    )
+                    self.provisioner.delete_dataset(request.customer_id, delete_contents=True)
+                    logger.info(f"Rollback successful: deleted dataset {result.dataset_id}")
+                except Exception as rollback_error:
+                    logger.error(
+                        f"Rollback failed for {request.customer_id}: {rollback_error}. "
+                        f"Manual cleanup may be required for dataset: {result.dataset_id}"
+                    )
+
             return result
 
     def offboard(self, customer_id: str, delete_data: bool = False) -> bool:
