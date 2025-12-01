@@ -182,6 +182,19 @@ class TestOnboardingOrchestratorValidation:
         errors = orchestrator.validate_request(request)
         assert any("Meta ad account ID" in e for e in errors)
 
+    def test_validate_invalid_industry_type(self):
+        """Test validation fails for invalid industry type."""
+        request = OnboardingRequest(
+            customer_id="test",
+            customer_name="Test",
+            industry=Industry.GOLF,
+        )
+        # Manually replace industry with invalid type
+        request.industry = "not_an_enum"
+        orchestrator = OnboardingOrchestrator()
+        errors = orchestrator.validate_request(request)
+        assert any("industry must be an Industry enum" in e for e in errors)
+
 
 class TestOnboardingOrchestratorOnboard:
     """Test onboard workflow."""

@@ -6,6 +6,7 @@ using Google Cloud Secret Manager.
 
 from __future__ import annotations
 
+import contextlib
 import os
 from dataclasses import dataclass
 
@@ -153,7 +154,8 @@ class CredentialStore:
         parent = self._get_parent()
 
         # Create secret if it doesn't exist
-        try:
+        # If secret already exists, suppress the error and continue to add new version
+        with contextlib.suppress(exceptions.AlreadyExists):
             self.client.create_secret(
                 request={
                     "parent": parent,
@@ -168,12 +170,6 @@ class CredentialStore:
                     },
                 }
             )
-        except exceptions.AlreadyExists:
-            # Secret already exists, which is fine - we'll just add a new version
-            pass
-        except Exception:
-            # Catch generic exceptions for "already exists" messages from mocks
-            pass
 
         # Add new version
         response = self.client.add_secret_version(
@@ -215,9 +211,6 @@ class CredentialStore:
             return response.payload.data.decode("utf-8")
         except exceptions.NotFound:
             return None
-        except Exception:
-            # Catch generic exceptions for "not found" messages from mocks
-            return None
 
     def delete_credential(
         self,
@@ -245,9 +238,6 @@ class CredentialStore:
             self.client.delete_secret(request={"name": secret_name})
             return True
         except exceptions.NotFound:
-            return False
-        except Exception:
-            # Catch generic exceptions for "not found" messages from mocks
             return False
 
     def list_customer_credentials(self, customer_id: str) -> list[str]:
@@ -297,9 +287,6 @@ class CredentialStore:
             self.client.get_secret(request={"name": secret_name})
             return True
         except exceptions.NotFound:
-            return False
-        except Exception:
-            # Catch generic exceptions for "not found" messages from mocks
             return False
 
     # Alias for backwards compatibility

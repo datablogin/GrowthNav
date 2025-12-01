@@ -3,6 +3,7 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+from google.api_core import exceptions as google_exceptions
 from growthnav.onboarding import CredentialConfig, CredentialStore
 
 
@@ -152,7 +153,7 @@ class TestCredentialStoreStoreCredential:
     def test_store_credential_secret_already_exists(self, config, mock_sm_client):
         """Test storing when secret already exists."""
         # Secret already exists
-        mock_sm_client.create_secret.side_effect = Exception("already exists")
+        mock_sm_client.create_secret.side_effect = google_exceptions.AlreadyExists("Secret already exists")
 
         store = CredentialStore(config=config)
 
@@ -230,7 +231,7 @@ class TestCredentialStoreGetCredential:
 
     def test_get_credential_not_found(self, config, mock_sm_client):
         """Test get_credential returns None when not found."""
-        mock_sm_client.access_secret_version.side_effect = Exception("not found")
+        mock_sm_client.access_secret_version.side_effect = google_exceptions.NotFound("Secret not found")
 
         store = CredentialStore(config=config)
 
@@ -279,7 +280,7 @@ class TestCredentialStoreDeleteCredential:
 
     def test_delete_credential_not_found(self, config, mock_sm_client):
         """Test delete_credential returns False when not found."""
-        mock_sm_client.delete_secret.side_effect = Exception("not found")
+        mock_sm_client.delete_secret.side_effect = google_exceptions.NotFound("Secret not found")
 
         store = CredentialStore(config=config)
 
@@ -362,7 +363,7 @@ class TestCredentialStoreCredentialExists:
 
     def test_credential_exists_false(self, config, mock_sm_client):
         """Test credential_exists returns False when credential doesn't exist."""
-        mock_sm_client.get_secret.side_effect = Exception("not found")
+        mock_sm_client.get_secret.side_effect = google_exceptions.NotFound("Secret not found")
 
         store = CredentialStore(config=config)
 
