@@ -371,6 +371,71 @@ Meta account IDs must start with `act_`:
 - **analytics-reporting**: Generate reports for customers
 - **bigquery-best-practices**: Query customer data efficiently
 
+## IAM Requirements
+
+The service account running onboarding operations requires specific permissions:
+
+### Required Roles
+
+| Resource | Role | Purpose |
+|----------|------|---------|
+| BigQuery | `roles/bigquery.admin` | Create datasets and tables |
+| Secret Manager | `roles/secretmanager.admin` | Store customer credentials |
+| Registry Dataset | `roles/bigquery.dataEditor` | Update customer registry |
+
+### Least Privilege Alternative
+
+For production, use these granular permissions instead of admin roles:
+
+**BigQuery Permissions**:
+- `bigquery.datasets.create` - Create customer datasets
+- `bigquery.datasets.get` - Read dataset metadata
+- `bigquery.datasets.delete` - Rollback on failure
+- `bigquery.tables.create` - Create standard tables
+- `bigquery.tables.updateData` - Update registry table
+
+**Secret Manager Permissions**:
+- `secretmanager.secrets.create` - Create new secrets
+- `secretmanager.versions.add` - Add secret versions
+- `secretmanager.versions.access` - Read secrets (for validation)
+- `secretmanager.secrets.delete` - Clean up on offboarding
+
+### Setting Up Permissions
+
+```bash
+# Create service account
+gcloud iam service-accounts create growthnav-onboarding \
+  --display-name="GrowthNav Onboarding Service"
+
+# Grant BigQuery permissions
+gcloud projects add-iam-policy-binding growthnav-prod \
+  --member="serviceAccount:growthnav-onboarding@growthnav-prod.iam.gserviceaccount.com" \
+  --role="roles/bigquery.admin"
+
+# Grant Secret Manager permissions
+gcloud projects add-iam-policy-binding growthnav-prod \
+  --member="serviceAccount:growthnav-onboarding@growthnav-prod.iam.gserviceaccount.com" \
+  --role="roles/secretmanager.admin"
+```
+
+### Verifying Permissions
+
+```python
+from google.cloud import bigquery
+from google.api_core.exceptions import Forbidden
+
+def check_bigquery_permissions(project_id: str) -> bool:
+    """Verify service account has required BigQuery permissions."""
+    try:
+        client = bigquery.Client(project=project_id)
+        # Try to list datasets (requires bigquery.datasets.list)
+        list(client.list_datasets(max_results=1))
+        return True
+    except Forbidden as e:
+        print(f"❌ Missing BigQuery permissions: {e}")
+        return False
+```
+
 ## API Rate Limits
 
 Be aware of these rate limits when onboarding multiple customers:
