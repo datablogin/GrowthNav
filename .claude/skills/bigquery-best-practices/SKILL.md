@@ -55,25 +55,80 @@ query_bigquery(
 
 The customer_id ensures isolation - queries cannot access other customers' data.
 
+## IAM Security
+
+GrowthNav enforces tenant isolation through IAM policies at the dataset level:
+
+### Required Service Account Roles
+
+| Role | Scope | Purpose |
+|------|-------|---------|
+| `roles/bigquery.dataViewer` | Per dataset | Read customer data |
+| `roles/bigquery.dataEditor` | Per dataset (ETL only) | Write customer data |
+| `roles/bigquery.jobUser` | Project | Run queries |
+
+**Important**: Service accounts should NOT have project-wide data access. Each customer dataset has its own IAM policy.
+
+### How Isolation is Enforced
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ GrowthNav Service Account                                   │
+├─────────────────────────────────────────────────────────────┤
+│ Project Role: bigquery.jobUser (can run queries)            │
+│                                                             │
+│ Dataset Roles (per customer):                               │
+│   growthnav_topgolf    → bigquery.dataViewer                │
+│   growthnav_puttery    → bigquery.dataViewer                │
+│   growthnav_medcorp_a  → bigquery.dataViewer                │
+│   growthnav_registry   → bigquery.dataViewer                │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Verifying Access
+
+```python
+# TenantBigQueryClient validates access at initialization
+try:
+    client = TenantBigQueryClient(customer_id="topgolf")
+except PermissionError as e:
+    print(f"No access to customer dataset: {e}")
+```
+
+### Cross-Tenant Prevention
+
+The `TenantBigQueryClient` prevents queries that reference other datasets:
+
+```python
+# This will be blocked - cannot query across tenants
+client.query("SELECT * FROM `growthnav_other_customer.conversions`")
+# Raises: SecurityError("Cross-tenant query detected")
+```
+
 ## Query Safety
 
 ### Automatic Validation
 
-The `QueryValidator` blocks destructive operations:
+The `QueryValidator` protects against destructive operations:
 
-| Operation | Status | Reason |
-|-----------|--------|--------|
-| SELECT | **Allowed** | Read-only |
-| DROP | **Blocked** | Destructive |
-| DELETE | **Blocked** | Data loss |
-| TRUNCATE | **Blocked** | Data loss |
-| INSERT | **Blocked*** | Requires `allow_writes=True` |
-| UPDATE | **Blocked*** | Requires `allow_writes=True` |
-| MERGE | **Blocked*** | Requires `allow_writes=True` |
-| CREATE | **Blocked** | Schema modification |
-| ALTER | **Blocked** | Schema modification |
+**Always Blocked** (cannot be overridden):
 
-*Write operations can be enabled for ETL pipelines.
+| Operation | Reason |
+|-----------|--------|
+| DROP | Destructive - data loss |
+| DELETE | Destructive - data loss |
+| TRUNCATE | Destructive - data loss |
+| CREATE | Schema modification |
+| ALTER | Schema modification |
+
+**Blocked by Default** (can enable with `allow_writes=True` for ETL):
+
+| Operation | Default | With `allow_writes=True` |
+|-----------|---------|--------------------------|
+| SELECT | ✅ Allowed | ✅ Allowed |
+| INSERT | ❌ Blocked | ✅ Allowed |
+| UPDATE | ❌ Blocked | ✅ Allowed |
+| MERGE | ❌ Blocked | ✅ Allowed |
 
 ### Automatic Warnings
 
@@ -112,6 +167,28 @@ estimate_query_cost(
     customer_id="topgolf",
     sql="SELECT * FROM large_table"
 )
+```
+
+### Cost Guardrails
+
+Implement cost checks before running expensive queries:
+
+```python
+MAX_QUERY_COST_USD = 1.00  # Set appropriate threshold
+
+estimate = client.estimate_cost(sql)
+
+if estimate['estimated_cost_usd'] > MAX_QUERY_COST_USD:
+    print(f"⚠️  High cost query: ${estimate['estimated_cost_usd']:.2f}")
+    print(f"   Will scan {estimate['bytes_processed'] / 1e9:.2f} GB")
+
+    # Require explicit confirmation for expensive queries
+    confirm = input("Proceed? (yes/no): ")
+    if confirm.lower() != "yes":
+        print("Query cancelled")
+        return None
+
+result = client.query(sql)
 ```
 
 ### BigQuery Pricing
@@ -234,8 +311,11 @@ for customer in golf_customers:
 
 ### Async Queries for Large Results
 
+Use async queries for large result sets or parallel execution:
+
 ```python
 import asyncio
+from growthnav.bigquery import TenantBigQueryClient
 
 async def get_large_dataset():
     client = TenantBigQueryClient(customer_id="topgolf")
@@ -243,10 +323,36 @@ async def get_large_dataset():
         "SELECT * FROM daily_metrics",
         max_results=100000
     )
-    return result
+    # Result contains: rows (list of dicts), total_rows, schema
+    print(f"Retrieved {len(result.rows)} of {result.total_rows} rows")
+    return result.rows
 
 # Run async
 data = asyncio.run(get_large_dataset())
+
+# Process rows
+for row in data:
+    print(f"{row['date']}: {row['revenue']}")
+```
+
+### Parallel Queries Across Customers
+
+```python
+async def get_industry_metrics(customer_ids: list[str]) -> dict:
+    """Query multiple customers in parallel."""
+    async def query_customer(customer_id: str):
+        client = TenantBigQueryClient(customer_id=customer_id)
+        result = await client.query_async(
+            "SELECT SUM(revenue) as total FROM daily_metrics"
+        )
+        return customer_id, result.rows[0]["total"]
+
+    tasks = [query_customer(cid) for cid in customer_ids]
+    results = await asyncio.gather(*tasks)
+    return dict(results)
+
+# Get metrics for all golf customers in parallel
+metrics = asyncio.run(get_industry_metrics(["topgolf", "puttery", "driveshack"]))
 ```
 
 ## Schema Information
@@ -364,7 +470,31 @@ result = validator.validate(sql, allow_writes=True)
 1. **Clustering**: Tables are clustered by common filter columns
 2. **Partitioning**: Time-based tables partition by date
 3. **Caching**: Queries cache for 24 hours (check `cache_hit`)
-4. **Slots**: On-demand pricing, no slot reservations needed
+4. **Slots**: On-demand pricing uses shared slots; consider reservations for:
+   - High concurrent query workloads (>50 simultaneous)
+   - SLA requirements (<1s query response)
+   - Predictable monthly billing
+
+## API Rate Limits
+
+| Operation | Limit | Notes |
+|-----------|-------|-------|
+| Concurrent queries | 100 per project | On-demand pricing |
+| Query result size | 10 GB | Per query |
+| API requests | 100 requests/second | Per user |
+| Dataset operations | 50/minute | Create, delete, update |
+| Table operations | 1,000/minute | Per dataset |
+
+**Recommendation**: For bulk operations, implement exponential backoff:
+
+```python
+import time
+from google.api_core import retry
+
+@retry.Retry(predicate=retry.if_exception_type(Exception))
+def query_with_retry(client, sql):
+    return client.query(sql)
+```
 
 ## Related Skills
 
