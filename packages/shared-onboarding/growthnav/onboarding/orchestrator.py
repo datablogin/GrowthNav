@@ -273,6 +273,25 @@ class OnboardingOrchestrator:
                             "Credential storage failed",
                             extra={"customer_id": request.customer_id}
                         )
+                        # Rollback: Mark customer as inactive since credential storage failed
+                        if result.customer and self._registry:
+                            try:
+                                from growthnav.bigquery import CustomerStatus
+
+                                logger.warning(
+                                    f"Rolling back registry entry for {request.customer_id} due to credential failure"
+                                )
+                                self._registry.update_customer(
+                                    request.customer_id, {"status": CustomerStatus.INACTIVE.value}
+                                )
+                                logger.info(
+                                    f"Rollback successful: marked registry entry inactive for {request.customer_id}"
+                                )
+                            except Exception as reg_rollback_error:
+                                logger.error(
+                                    f"Registry rollback failed for {request.customer_id}: {reg_rollback_error}. "
+                                    f"Manual cleanup may be required."
+                                )
                         return result
 
             # Success
@@ -298,12 +317,18 @@ class OnboardingOrchestrator:
             )
 
             # Rollback: Clean up created resources on failure
-            # First, try to remove registry entry if it was created
+            # First, try to mark registry entry as inactive if it was created
             if result.customer and self._registry:
                 try:
+                    from growthnav.bigquery import CustomerStatus
+
                     logger.warning(f"Rolling back registry entry for {request.customer_id}")
-                    self._registry.delete_customer(request.customer_id)
-                    logger.info(f"Rollback successful: removed registry entry for {request.customer_id}")
+                    self._registry.update_customer(
+                        request.customer_id, {"status": CustomerStatus.INACTIVE.value}
+                    )
+                    logger.info(
+                        f"Rollback successful: marked registry entry inactive for {request.customer_id}"
+                    )
                 except Exception as reg_rollback_error:
                     logger.error(
                         f"Registry rollback failed for {request.customer_id}: {reg_rollback_error}. "

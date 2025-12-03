@@ -503,6 +503,71 @@ class TestOnboardingOrchestratorOnboard:
         assert result.status == OnboardingStatus.FAILED
         mock_provisioner.delete_dataset.assert_called_once()
 
+    def test_onboard_rollback_registry_on_credential_failure(
+        self, mock_provisioner, mock_registry
+    ):
+        """Test that registry entry is marked inactive when credential storage fails."""
+        mock_credential_store = MagicMock()
+        # Credential storage fails with an exception that triggers the outer except block
+        mock_credential_store.store_credential.side_effect = RuntimeError("Connection lost")
+
+        request = OnboardingRequest(
+            customer_id="test",
+            customer_name="Test",
+            industry=Industry.GOLF,
+            gcp_project_id="test-project",
+            credentials={"token": "value"},
+        )
+
+        orchestrator = OnboardingOrchestrator(
+            registry=mock_registry,
+            provisioner=mock_provisioner,
+            credential_store=mock_credential_store,
+        )
+
+        result = orchestrator.onboard(request)
+
+        assert result.status == OnboardingStatus.FAILED
+        # Registry should be updated to mark customer as inactive
+        mock_registry.update_customer.assert_called()
+
+    def test_onboard_registry_rollback_failure_logs_error(
+        self, mock_provisioner, mock_registry
+    ):
+        """Test that registry rollback failure is logged but doesn't raise."""
+        # Dataset and registry succeed, but then something fails in the outer try
+        mock_provisioner.create_dataset.return_value = "test-project.growthnav_test"
+        mock_registry.add_customer.return_value = None
+
+        mock_credential_store = MagicMock()
+        # Use a RuntimeError (not caught by inner try/except) to trigger outer except
+        mock_credential_store.store_credential.side_effect = RuntimeError("Unexpected error")
+
+        # Reset the update_customer mock from fixture and make it fail during rollback
+        mock_registry.update_customer.reset_mock()
+        mock_registry.update_customer.side_effect = Exception("Registry update failed")
+
+        request = OnboardingRequest(
+            customer_id="test",
+            customer_name="Test",
+            industry=Industry.GOLF,
+            gcp_project_id="test-project",
+            credentials={"token": "value"},
+        )
+
+        orchestrator = OnboardingOrchestrator(
+            registry=mock_registry,
+            provisioner=mock_provisioner,
+            credential_store=mock_credential_store,
+        )
+
+        # Should not raise even if registry rollback fails
+        result = orchestrator.onboard(request)
+
+        assert result.status == OnboardingStatus.FAILED
+        # Registry update should have been attempted
+        mock_registry.update_customer.assert_called_once()
+
 
 class TestOnboardingOrchestratorOffboard:
     """Test offboard workflow."""
