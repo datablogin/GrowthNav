@@ -189,13 +189,22 @@ class CredentialStore:
                 }
             )
 
-        # Add new version
-        response = self.client.add_secret_version(
-            request={
-                "parent": f"{parent}/secrets/{secret_id}",
-                "payload": {"data": credential_value.encode("utf-8")},
-            }
-        )
+        # Add new version with specific exception handling
+        try:
+            response = self.client.add_secret_version(
+                request={
+                    "parent": f"{parent}/secrets/{secret_id}",
+                    "payload": {"data": credential_value.encode("utf-8")},
+                }
+            )
+        except exceptions.PermissionDenied as e:
+            raise PermissionError(
+                f"Insufficient permissions to store credential for {customer_id}"
+            ) from e
+        except exceptions.InvalidArgument as e:
+            raise ValueError(
+                f"Invalid credential format for {credential_type}"
+            ) from e
 
         return response.name
 

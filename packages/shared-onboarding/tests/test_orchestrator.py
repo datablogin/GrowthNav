@@ -144,7 +144,7 @@ class TestOnboardingOrchestratorValidation:
         )
         orchestrator = OnboardingOrchestrator()
         errors = orchestrator.validate_request(request)
-        assert any("alphanumeric" in e for e in errors)
+        assert any("start with lowercase letter" in e for e in errors)
 
     def test_validate_invalid_google_ads_id_format(self):
         """Test validation fails for invalid Google Ads ID."""
