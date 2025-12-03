@@ -569,6 +569,88 @@ class TestOnboardingOrchestratorOnboard:
         mock_registry.update_customer.assert_called_once()
 
 
+    def test_onboard_outer_except_registry_rollback(
+        self, mock_provisioner, mock_registry
+    ):
+        """Test outer except block registry rollback when unexpected exception after add_customer."""
+        import growthnav.onboarding.orchestrator as orchestrator_module
+
+        # Dataset creation succeeds
+        mock_provisioner.create_dataset.return_value = "test-project.growthnav_test"
+        mock_registry.add_customer.return_value = None
+
+        request = OnboardingRequest(
+            customer_id="test",
+            customer_name="Test",
+            industry=Industry.GOLF,
+            gcp_project_id="test-project",
+            # No credentials - so we don't enter the credential storage block
+        )
+
+        orchestrator = OnboardingOrchestrator(
+            registry=mock_registry,
+            provisioner=mock_provisioner,
+        )
+
+        # Mock logger.info to raise after add_customer succeeds but customer is set
+        original_info = orchestrator_module.logger.info
+        call_count = [0]
+
+        def mock_info(msg, *args, **kwargs):
+            call_count[0] += 1
+            # Raise on the "Registered customer" log message (after result.customer is set)
+            if "Registered customer" in msg:
+                raise RuntimeError("Unexpected logging failure")
+            return original_info(msg, *args, **kwargs)
+
+        with patch.object(orchestrator_module.logger, "info", side_effect=mock_info):
+            result = orchestrator.onboard(request)
+
+        assert result.status == OnboardingStatus.FAILED
+        assert "Unexpected logging failure" in result.errors[0]
+        # Outer except block registry rollback should have been attempted
+        mock_registry.update_customer.assert_called()
+
+    def test_onboard_outer_except_registry_rollback_failure(
+        self, mock_provisioner, mock_registry
+    ):
+        """Test outer except block continues when registry rollback fails."""
+        import growthnav.onboarding.orchestrator as orchestrator_module
+
+        # Dataset creation succeeds
+        mock_provisioner.create_dataset.return_value = "test-project.growthnav_test"
+        mock_registry.add_customer.return_value = None
+        # Registry rollback will fail
+        mock_registry.update_customer.side_effect = Exception("Registry update failed")
+
+        request = OnboardingRequest(
+            customer_id="test",
+            customer_name="Test",
+            industry=Industry.GOLF,
+            gcp_project_id="test-project",
+        )
+
+        orchestrator = OnboardingOrchestrator(
+            registry=mock_registry,
+            provisioner=mock_provisioner,
+        )
+
+        # Mock logger.info to raise after add_customer
+        original_info = orchestrator_module.logger.info
+
+        def mock_info(msg, *args, **kwargs):
+            if "Registered customer" in msg:
+                raise RuntimeError("Unexpected failure")
+            return original_info(msg, *args, **kwargs)
+
+        with patch.object(orchestrator_module.logger, "info", side_effect=mock_info):
+            result = orchestrator.onboard(request)
+
+        assert result.status == OnboardingStatus.FAILED
+        # Should have tried to rollback (even though it failed)
+        mock_registry.update_customer.assert_called_once()
+
+
 class TestOnboardingOrchestratorOffboard:
     """Test offboard workflow."""
 
