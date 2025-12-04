@@ -12,7 +12,6 @@ Run with:
     RUN_SHEETS_INTEGRATION_TESTS=1 uv run pytest packages/shared-reporting/tests/test_integration_sheets.py -v
 """
 
-import json
 import os
 import time
 from collections.abc import Generator
@@ -21,60 +20,14 @@ from datetime import datetime
 import gspread
 import pandas as pd
 import pytest
-from google.auth import default
-from google.auth.exceptions import DefaultCredentialsError
-from google.oauth2.service_account import Credentials
 from growthnav.reporting.sheets import SheetsExporter
 
-# Rate limit delay between tests (seconds)
-# Google Sheets API has limits of 60 read/write requests per minute per user
-RATE_LIMIT_DELAY = 5
-
-# Delay between cleanup operations to avoid rate limits
-# Using 1.0 second to stay safely within 60 requests/minute limit
-CLEANUP_DELAY = 1.0
-
-# Environment variable for test sharing email
-TEST_SHARE_EMAIL = os.getenv(
-    "GROWTHNAV_TEST_SHARE_EMAIL",
-    "growthnav-ci@topgolf-460202.iam.gserviceaccount.com",
+from conftest import (
+    CLEANUP_DELAY,
+    RATE_LIMIT_DELAY,
+    TEST_SHARE_EMAIL,
+    get_cleanup_credentials,
 )
-
-# Default impersonation email for domain-wide delegation
-DEFAULT_IMPERSONATE_EMAIL = os.getenv(
-    "GROWTHNAV_IMPERSONATE_EMAIL",
-    "access@roimediapartners.com",
-)
-
-
-def get_cleanup_credentials(
-    scopes: list[str] | None = None,
-) -> Credentials | None:
-    """Get credentials for test cleanup with domain-wide delegation."""
-    if scopes is None:
-        scopes = ["https://www.googleapis.com/auth/drive.file"]
-
-    credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-
-    if credentials_path:
-        try:
-            with open(credentials_path) as f:
-                cred_data = json.load(f)
-
-            if cred_data.get("type") == "service_account":
-                return Credentials.from_service_account_file(
-                    credentials_path,
-                    scopes=scopes,
-                    subject=DEFAULT_IMPERSONATE_EMAIL,
-                )
-        except (OSError, json.JSONDecodeError) as e:
-            print(f"Warning: Could not load credentials from file: {e}")
-
-    try:
-        creds, _ = default(scopes=scopes)
-        return creds
-    except DefaultCredentialsError:
-        return None
 
 # Skip all tests unless explicitly enabled via environment variable
 # These tests require Google Workspace access which service accounts may not have
@@ -160,7 +113,8 @@ class TestSheetsExporterIntegration:
         spreadsheet_id = url.split("/d/")[1].split("/")[0]
         created_spreadsheets.append(spreadsheet_id)
 
-        # Verify URL format
+        # Verify URL format and type
+        assert isinstance(url, str)
         assert url.startswith("https://docs.google.com/spreadsheets/d/")
         assert len(spreadsheet_id) > 0
 

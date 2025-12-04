@@ -1659,10 +1659,10 @@ class TestSlidesGeneratorFromTemplate:
 ### Success Criteria
 
 #### Automated Verification:
-- [ ] `uv run --package growthnav-reporting pytest packages/shared-reporting/tests/ -v` passes
-- [ ] `uv run pytest packages/shared-reporting/tests/ --cov=growthnav.reporting --cov-report=term-missing` shows >80% coverage
-- [ ] `uv run mypy packages/shared-reporting/` passes
-- [ ] `uv run ruff check packages/shared-reporting/` passes
+- [x] `uv run --package growthnav-reporting pytest packages/shared-reporting/tests/ -v` passes
+- [x] `uv run pytest packages/shared-reporting/tests/ --cov=growthnav.reporting --cov-report=term-missing` shows >80% coverage
+- [x] `uv run mypy packages/shared-reporting/` passes
+- [x] `uv run ruff check packages/shared-reporting/` passes
 
 #### Manual Verification:
 - [ ] Review mock setup matches actual Google API behavior

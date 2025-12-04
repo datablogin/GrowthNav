@@ -11,9 +11,12 @@ Based on existing PaidSocialNav implementation with improvements:
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pandas as pd
+
+if TYPE_CHECKING:
+    import gspread
 
 # Default impersonation email for domain-wide delegation
 DEFAULT_IMPERSONATE_EMAIL = "access@roimediapartners.com"
@@ -142,7 +145,7 @@ class SheetsExporter:
             for email in share_with:
                 spreadsheet.share(email, perm_type="user", role="reader")
 
-        return spreadsheet.url
+        return str(spreadsheet.url)
 
     def create_multi_tab_dashboard(
         self,
@@ -184,7 +187,7 @@ class SheetsExporter:
             for email in share_with:
                 spreadsheet.share(email, perm_type="user", role="reader")
 
-        return spreadsheet.url
+        return str(spreadsheet.url)
 
     def update_sheet(
         self,
@@ -209,7 +212,7 @@ class SheetsExporter:
 
     def _batch_update_from_dataframe(
         self,
-        worksheet,
+        worksheet: gspread.Worksheet,
         data: pd.DataFrame,
     ) -> None:
         """
