@@ -142,7 +142,7 @@ class SheetsExporter:
             for email in share_with:
                 spreadsheet.share(email, perm_type="user", role="reader")
 
-        return spreadsheet.url
+        return str(spreadsheet.url)
 
     def create_multi_tab_dashboard(
         self,
@@ -184,7 +184,7 @@ class SheetsExporter:
             for email in share_with:
                 spreadsheet.share(email, perm_type="user", role="reader")
 
-        return spreadsheet.url
+        return str(spreadsheet.url)
 
     def update_sheet(
         self,

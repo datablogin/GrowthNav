@@ -62,17 +62,18 @@ def get_cleanup_credentials(
                 cred_data = json.load(f)
 
             if cred_data.get("type") == "service_account":
-                return Credentials.from_service_account_file(
+                creds = Credentials.from_service_account_file(
                     credentials_path,
                     scopes=scopes,
                     subject=DEFAULT_IMPERSONATE_EMAIL,
                 )
+                return creds  # type: ignore[no-any-return]
         except (OSError, json.JSONDecodeError) as e:
             print(f"Warning: Could not load credentials from file: {e}")
 
     try:
         creds, _ = default(scopes=scopes)
-        return creds
+        return creds  # type: ignore[no-any-return]
     except DefaultCredentialsError:
         return None
 
