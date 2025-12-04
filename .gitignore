@@ -96,3 +96,5 @@ service-account.json
 
 # UV
 .uv/
+# Service account keys (never commit these)
+topgolf-460202-*.json
