@@ -199,6 +199,36 @@ class TestCredentialStoreStoreCredential:
         assert labels["credential_type"] == "refresh-token"
         assert labels["managed_by"] == "growthnav"
 
+    def test_store_credential_permission_denied(self, config, mock_sm_client):
+        """Test store_credential raises PermissionError on PermissionDenied."""
+        mock_sm_client.add_secret_version.side_effect = google_exceptions.PermissionDenied(
+            "Permission denied"
+        )
+
+        store = CredentialStore(config=config)
+
+        with pytest.raises(PermissionError, match="Insufficient permissions"):
+            store.store_credential(
+                customer_id="test_customer",
+                credential_type="refresh_token",
+                credential_value="token123",
+            )
+
+    def test_store_credential_invalid_argument(self, config, mock_sm_client):
+        """Test store_credential raises ValueError on InvalidArgument."""
+        mock_sm_client.add_secret_version.side_effect = google_exceptions.InvalidArgument(
+            "Invalid argument"
+        )
+
+        store = CredentialStore(config=config)
+
+        with pytest.raises(ValueError, match="Invalid credential format"):
+            store.store_credential(
+                customer_id="test_customer",
+                credential_type="refresh_token",
+                credential_value="token123",
+            )
+
 
 class TestCredentialStoreGetCredential:
     """Test get_credential method."""

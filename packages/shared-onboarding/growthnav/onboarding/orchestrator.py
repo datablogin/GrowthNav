@@ -7,6 +7,7 @@ including dataset creation, registry registration, and credential storage.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
@@ -145,12 +146,14 @@ class OnboardingOrchestrator:
         """
         errors = []
 
-        # Required fields
+        # Required fields - customer_id validation
         if not request.customer_id:
             errors.append("customer_id is required")
-        elif not request.customer_id.replace("_", "").replace("-", "").isalnum():
+        elif not re.match(r"^[a-z][a-z0-9_]{2,31}$", request.customer_id):
             errors.append(
-                "customer_id must contain only alphanumeric characters, underscores, and hyphens"
+                "customer_id must: start with lowercase letter, "
+                "contain only lowercase letters/numbers/underscores, "
+                "be 3-32 characters long"
             )
 
         if not request.customer_name:
@@ -173,8 +176,6 @@ class OnboardingOrchestrator:
 
     def _is_valid_google_ads_id(self, gads_id: str) -> bool:
         """Check if a Google Ads customer ID is valid format."""
-        import re
-
         return bool(re.match(r"^\d{3}-\d{3}-\d{4}$", gads_id))
 
     def onboard(self, request: OnboardingRequest) -> OnboardingResult:
@@ -272,6 +273,25 @@ class OnboardingOrchestrator:
                             "Credential storage failed",
                             extra={"customer_id": request.customer_id}
                         )
+                        # Rollback: Mark customer as inactive since credential storage failed
+                        if result.customer and self._registry:
+                            try:
+                                from growthnav.bigquery import CustomerStatus
+
+                                logger.warning(
+                                    f"Rolling back registry entry for {request.customer_id} due to credential failure"
+                                )
+                                self._registry.update_customer(
+                                    request.customer_id, {"status": CustomerStatus.INACTIVE.value}
+                                )
+                                logger.info(
+                                    f"Rollback successful: marked registry entry inactive for {request.customer_id}"
+                                )
+                            except Exception as reg_rollback_error:
+                                logger.error(
+                                    f"Registry rollback failed for {request.customer_id}: {reg_rollback_error}. "
+                                    f"Manual cleanup may be required."
+                                )
                         return result
 
             # Success
@@ -296,7 +316,26 @@ class OnboardingOrchestrator:
                 extra={"sanitized_error": error_msg}
             )
 
-            # Rollback: Delete dataset if it was created but subsequent steps failed
+            # Rollback: Clean up created resources on failure
+            # First, try to mark registry entry as inactive if it was created
+            if result.customer and self._registry:
+                try:
+                    from growthnav.bigquery import CustomerStatus
+
+                    logger.warning(f"Rolling back registry entry for {request.customer_id}")
+                    self._registry.update_customer(
+                        request.customer_id, {"status": CustomerStatus.INACTIVE.value}
+                    )
+                    logger.info(
+                        f"Rollback successful: marked registry entry inactive for {request.customer_id}"
+                    )
+                except Exception as reg_rollback_error:
+                    logger.error(
+                        f"Registry rollback failed for {request.customer_id}: {reg_rollback_error}. "
+                        f"Manual cleanup may be required."
+                    )
+
+            # Then, delete dataset if it was created
             if result.dataset_id and self.provisioner:
                 try:
                     logger.warning(
