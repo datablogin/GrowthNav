@@ -64,8 +64,8 @@ class ConnectorConfig:
     credentials_secret_path: str | None = None  # Secret Manager path
     credentials: dict[str, Any] = field(default_factory=dict, repr=False)
 
-    # Connection settings
-    connection_params: dict[str, Any] = field(default_factory=dict)
+    # Connection settings (repr=False as may contain sensitive info like hostnames)
+    connection_params: dict[str, Any] = field(default_factory=dict, repr=False)
 
     # Field mapping overrides
     field_overrides: dict[str, str] = field(default_factory=dict)

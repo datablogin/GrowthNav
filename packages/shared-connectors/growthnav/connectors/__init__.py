@@ -39,6 +39,7 @@ from growthnav.connectors.config import (
 )
 from growthnav.connectors.exceptions import (
     AuthenticationError,
+    ConnectorConnectionError,
     ConnectorError,
     SchemaError,
     SyncError,
@@ -56,6 +57,7 @@ __all__ = [
     "SyncSchedule",
     # Exceptions
     "AuthenticationError",
+    "ConnectorConnectionError",
     "ConnectorError",
     "SchemaError",
     "SyncError",

@@ -27,7 +27,10 @@ class SchemaError(ConnectorError):
     pass
 
 
-class ConnectionError(ConnectorError):
-    """Raised when connection to external system fails."""
+class ConnectorConnectionError(ConnectorError):
+    """Raised when connection to external system fails.
+
+    Named ConnectorConnectionError to avoid shadowing the builtin ConnectionError.
+    """
 
     pass

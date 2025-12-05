@@ -179,3 +179,66 @@ class TestBaseConnector:
     def test_connector_type_class_attribute(self, mock_connector) -> None:
         """Test connector_type is accessible."""
         assert mock_connector.connector_type == ConnectorType.SNOWFLAKE
+
+    def test_context_manager(self, mock_connector) -> None:
+        """Test connector can be used as context manager."""
+        mock_connector.authenticate()
+        assert mock_connector._authenticated is True
+
+        with mock_connector as connector:
+            assert connector is mock_connector
+            assert connector._authenticated is True
+
+        # After exiting context, should be closed
+        assert mock_connector._authenticated is False
+        assert mock_connector._client is None
+
+    def test_sync_with_batch_processing(self, mock_connector) -> None:
+        """Test sync processes records in batches."""
+        # Create more records than batch_size
+        mock_connector.set_mock_records([{"id": i} for i in range(5)])
+
+        result = mock_connector.sync(batch_size=2)
+
+        assert result.success is True
+        assert result.records_fetched == 5
+        assert result.records_normalized == 5
+
+    def test_sync_sets_cursor(self, mock_connector) -> None:
+        """Test sync sets cursor for incremental sync."""
+        mock_connector.set_mock_records([{"id": 1}])
+
+        result = mock_connector.sync()
+
+        assert result.cursor is not None
+        # Cursor should be an ISO format datetime string
+        datetime.fromisoformat(result.cursor)
+
+    def test_sync_invalid_time_range(self, mock_connector) -> None:
+        """Test sync validates time range."""
+        since = datetime(2024, 2, 1, tzinfo=UTC)
+        until = datetime(2024, 1, 1, tzinfo=UTC)  # Before since
+
+        result = mock_connector.sync(since=since, until=until)
+
+        assert result.success is False
+        assert "must be before" in result.error
+
+    def test_init_subclass_missing_connector_type(self) -> None:
+        """Test that subclasses without connector_type raise TypeError."""
+        import pytest
+        from growthnav.connectors.base import BaseConnector
+
+        with pytest.raises(TypeError, match="must define a 'connector_type'"):
+            class BadConnector(BaseConnector):
+                def authenticate(self) -> None:
+                    pass
+
+                def fetch_records(self, since=None, until=None, limit=None):
+                    yield from []
+
+                def get_schema(self):
+                    return {}
+
+                def normalize(self, raw_records):
+                    return raw_records
