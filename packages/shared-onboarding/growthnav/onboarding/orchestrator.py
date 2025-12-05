@@ -488,7 +488,13 @@ class OnboardingOrchestrator:
                 "weekly": SyncSchedule.WEEKLY,
                 "manual": SyncSchedule.MANUAL,
             }
-            sync_schedule = sync_schedule_map.get(ds_config.sync_schedule, SyncSchedule.DAILY)
+            sync_schedule = sync_schedule_map.get(ds_config.sync_schedule)
+            if sync_schedule is None:
+                logger.warning(
+                    f"Unknown sync schedule '{ds_config.sync_schedule}' for {customer_id}, "
+                    f"defaulting to 'daily'"
+                )
+                sync_schedule = SyncSchedule.DAILY
 
             connector_config = ConnectorConfig(
                 connector_type=connector_type,

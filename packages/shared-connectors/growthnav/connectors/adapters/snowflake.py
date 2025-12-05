@@ -86,7 +86,6 @@ class SnowflakeConnector(BaseConnector):
     def __init__(self, config: ConnectorConfig):
         """Initialize Snowflake connector."""
         super().__init__(config)
-        self._cursor = None
 
     def authenticate(self) -> None:
         """Connect to Snowflake.

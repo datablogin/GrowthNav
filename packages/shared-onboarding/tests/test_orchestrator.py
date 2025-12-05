@@ -1025,6 +1025,40 @@ class TestOnboardingOrchestratorDataSources:
         assert any("Storage error" in e for e in result.errors)
         assert any("Registry rollback failed" in e for e in result.errors)
 
+    def test_onboard_warns_on_invalid_sync_schedule(
+        self, mock_provisioner, mock_registry, mock_connector_storage, caplog
+    ):
+        """Test that invalid sync_schedule logs a warning and defaults to daily."""
+        import logging
+
+        request = OnboardingRequest(
+            customer_id="test",
+            customer_name="Test",
+            industry=Industry.GOLF,
+            gcp_project_id="test-project",
+            data_sources=[
+                DataSourceConfig(
+                    connector_type="snowflake",
+                    name="Toast POS",
+                    sync_schedule="invalid_schedule",  # Invalid value
+                ),
+            ],
+        )
+
+        orchestrator = OnboardingOrchestrator(
+            registry=mock_registry,
+            provisioner=mock_provisioner,
+            connector_storage=mock_connector_storage,
+        )
+
+        with caplog.at_level(logging.WARNING):
+            result = orchestrator.onboard(request)
+
+        assert result.is_success
+        # Check warning was logged
+        assert any("Unknown sync schedule 'invalid_schedule'" in record.message for record in caplog.records)
+        assert any("defaulting to 'daily'" in record.message for record in caplog.records)
+
     def test_connector_storage_property(self):
         """Test connector_storage property returns configured storage."""
         mock_storage = MagicMock()
