@@ -242,3 +242,48 @@ class TestBaseConnector:
 
                 def normalize(self, raw_records):
                     return raw_records
+
+    def test_init_subclass_abstract_subclass_allowed(self) -> None:
+        """Test that abstract subclasses are allowed without connector_type."""
+        from abc import ABC
+
+        from growthnav.connectors.base import BaseConnector
+
+        # This should not raise - abstract subclasses don't need connector_type
+        class AbstractConnector(BaseConnector, ABC):
+            """An intermediate abstract connector."""
+
+            pass
+
+        # The class should exist without error
+        assert AbstractConnector is not None
+
+    def test_cleanup_client_called_on_close(self, connector_config) -> None:
+        """Test that _cleanup_client is called when closing."""
+        from growthnav.connectors.base import BaseConnector
+
+        cleanup_called = []
+
+        class CleanupConnector(BaseConnector):
+            connector_type = ConnectorType.SNOWFLAKE
+
+            def authenticate(self) -> None:
+                self._authenticated = True
+
+            def fetch_records(self, since=None, until=None, limit=None):
+                yield from []
+
+            def get_schema(self):
+                return {}
+
+            def normalize(self, raw_records):
+                return raw_records
+
+            def _cleanup_client(self) -> None:
+                cleanup_called.append(True)
+
+        connector = CleanupConnector(connector_config)
+        connector.authenticate()
+        connector.close()
+
+        assert len(cleanup_called) == 1
