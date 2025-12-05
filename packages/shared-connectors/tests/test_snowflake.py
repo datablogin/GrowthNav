@@ -2,12 +2,54 @@
 
 from __future__ import annotations
 
+import sys
 from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
 from growthnav.connectors.config import ConnectorConfig, ConnectorType, SyncMode
 from growthnav.connectors.exceptions import AuthenticationError, SchemaError
+
+
+class TestAdaptersInit:
+    """Tests for adapters __init__.py module."""
+
+    def test_adapters_import_error_handling(self) -> None:
+        """Test adapters module handles ImportError gracefully when snowflake not installed."""
+        # Store original modules
+        original_modules = {}
+        modules_to_remove = [k for k in sys.modules if 'snowflake' in k or 'growthnav.connectors.adapters' in k]
+        for key in modules_to_remove:
+            original_modules[key] = sys.modules.pop(key, None)
+
+        try:
+            # Mock the import to fail for snowflake
+            import builtins
+            real_import = builtins.__import__
+
+            def mock_import(name, *args, **kwargs):
+                if 'snowflake' in name:
+                    raise ImportError("No module named 'snowflake'")
+                return real_import(name, *args, **kwargs)
+
+            with patch.object(builtins, '__import__', side_effect=mock_import):
+                # Force reimport of adapters module
+                if 'growthnav.connectors.adapters' in sys.modules:
+                    del sys.modules['growthnav.connectors.adapters']
+
+                # This should not raise - it should gracefully handle the ImportError
+                import importlib
+                adapters_module = importlib.import_module('growthnav.connectors.adapters')
+
+                # __all__ should be empty when snowflake import fails
+                assert adapters_module.__all__ == []
+        finally:
+            # Restore original modules
+            for key, value in original_modules.items():
+                if value is not None:
+                    sys.modules[key] = value
+            # Re-import to restore state
+            import growthnav.connectors.adapters  # noqa: F401
 
 
 @pytest.fixture
@@ -439,6 +481,96 @@ class TestSnowflakeConnector:
 
             # Should still mark as not authenticated
             assert connector._authenticated is False
+
+
+class TestSQLIdentifierValidation:
+    """Tests for SQL identifier validation."""
+
+    def test_validate_identifier_valid_names(self) -> None:
+        """Test valid SQL identifiers are accepted."""
+        mock_snowflake = MagicMock()
+        with patch.dict("sys.modules", {"snowflake": mock_snowflake, "snowflake.connector": mock_snowflake.connector}):
+            from growthnav.connectors.adapters.snowflake import _validate_identifier
+
+            # Valid identifiers
+            assert _validate_identifier("TRANSACTIONS") == "TRANSACTIONS"
+            assert _validate_identifier("my_table") == "my_table"
+            assert _validate_identifier("Table123") == "Table123"
+            assert _validate_identifier("_private") == "_private"
+            assert _validate_identifier("A") == "A"
+
+    def test_validate_identifier_invalid_names(self) -> None:
+        """Test invalid SQL identifiers are rejected."""
+        mock_snowflake = MagicMock()
+        with patch.dict("sys.modules", {"snowflake": mock_snowflake, "snowflake.connector": mock_snowflake.connector}):
+            from growthnav.connectors.adapters.snowflake import _validate_identifier
+
+            # SQL injection attempts
+            with pytest.raises(ValueError, match="Invalid SQL"):
+                _validate_identifier("TRANSACTIONS; DROP TABLE users;--")
+
+            with pytest.raises(ValueError, match="Invalid SQL"):
+                _validate_identifier("table' OR '1'='1")
+
+            with pytest.raises(ValueError, match="Invalid SQL"):
+                _validate_identifier("123invalid")  # Can't start with number
+
+            with pytest.raises(ValueError, match="Invalid SQL"):
+                _validate_identifier("table-name")  # Hyphen not allowed
+
+            with pytest.raises(ValueError, match="Invalid SQL"):
+                _validate_identifier("table.name")  # Dot not allowed
+
+            with pytest.raises(ValueError, match="Invalid SQL"):
+                _validate_identifier("")  # Empty not allowed
+
+    def test_fetch_records_with_invalid_table(self, snowflake_config) -> None:
+        """Test fetch_records rejects invalid table names."""
+        snowflake_config.connection_params["table"] = "TRANSACTIONS; DROP TABLE users;--"
+
+        mock_connection = MagicMock()
+        mock_snowflake = MagicMock()
+        mock_snowflake.connector.connect.return_value = mock_connection
+
+        with patch.dict("sys.modules", {"snowflake": mock_snowflake, "snowflake.connector": mock_snowflake.connector}):
+            from growthnav.connectors.adapters.snowflake import SnowflakeConnector
+            connector = SnowflakeConnector(snowflake_config)
+            connector.authenticate()
+
+            with pytest.raises(ValueError, match="Invalid SQL table"):
+                list(connector.fetch_records())
+
+    def test_fetch_records_with_invalid_timestamp_column(self, snowflake_config) -> None:
+        """Test fetch_records rejects invalid timestamp column names."""
+        snowflake_config.connection_params["timestamp_column"] = "col' OR '1'='1"
+
+        mock_connection = MagicMock()
+        mock_snowflake = MagicMock()
+        mock_snowflake.connector.connect.return_value = mock_connection
+
+        with patch.dict("sys.modules", {"snowflake": mock_snowflake, "snowflake.connector": mock_snowflake.connector}):
+            from growthnav.connectors.adapters.snowflake import SnowflakeConnector
+            connector = SnowflakeConnector(snowflake_config)
+            connector.authenticate()
+
+            with pytest.raises(ValueError, match="Invalid SQL column"):
+                list(connector.fetch_records())
+
+    def test_get_schema_with_invalid_table(self, snowflake_config) -> None:
+        """Test get_schema rejects invalid table names."""
+        snowflake_config.connection_params["table"] = "table; DROP TABLE x;--"
+
+        mock_connection = MagicMock()
+        mock_snowflake = MagicMock()
+        mock_snowflake.connector.connect.return_value = mock_connection
+
+        with patch.dict("sys.modules", {"snowflake": mock_snowflake, "snowflake.connector": mock_snowflake.connector}):
+            from growthnav.connectors.adapters.snowflake import SnowflakeConnector
+            connector = SnowflakeConnector(snowflake_config)
+            connector.authenticate()
+
+            with pytest.raises(ValueError, match="Invalid SQL table"):
+                connector.get_schema()
 
 
 class TestSnowflakeConnectorSync:

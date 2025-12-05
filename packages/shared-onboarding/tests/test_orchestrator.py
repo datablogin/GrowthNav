@@ -991,6 +991,40 @@ class TestOnboardingOrchestratorDataSources:
         # Registry should be updated to mark customer as inactive
         mock_registry.update_customer.assert_called()
 
+    def test_onboard_data_sources_rollback_failure_adds_error(
+        self, mock_provisioner, mock_registry, mock_connector_storage
+    ):
+        """Test that rollback failure is added to errors when both data source and rollback fail."""
+        mock_connector_storage.save.side_effect = Exception("Storage error")
+        mock_registry.update_customer.side_effect = Exception("Registry update failed")
+
+        request = OnboardingRequest(
+            customer_id="test",
+            customer_name="Test",
+            industry=Industry.GOLF,
+            gcp_project_id="test-project",
+            data_sources=[
+                DataSourceConfig(
+                    connector_type="snowflake",
+                    name="Toast POS",
+                ),
+            ],
+        )
+
+        orchestrator = OnboardingOrchestrator(
+            registry=mock_registry,
+            provisioner=mock_provisioner,
+            connector_storage=mock_connector_storage,
+        )
+
+        result = orchestrator.onboard(request)
+
+        assert result.status == OnboardingStatus.FAILED
+        # Should have both the original error and the rollback failure error
+        assert len(result.errors) == 2
+        assert any("Storage error" in e for e in result.errors)
+        assert any("Registry rollback failed" in e for e in result.errors)
+
     def test_connector_storage_property(self):
         """Test connector_storage property returns configured storage."""
         mock_storage = MagicMock()

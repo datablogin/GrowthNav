@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Generator
 from datetime import datetime
 from typing import Any
@@ -14,6 +15,30 @@ from growthnav.connectors.registry import get_registry
 from growthnav.conversions import Conversion, POSNormalizer
 
 logger = logging.getLogger(__name__)
+
+# Pattern for valid SQL identifiers (table/column names)
+_SQL_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _validate_identifier(name: str, identifier_type: str = "identifier") -> str:
+    """Validate a SQL identifier (table/column name).
+
+    Args:
+        name: The identifier to validate.
+        identifier_type: Type of identifier for error message (e.g., "table", "column").
+
+    Returns:
+        The validated identifier.
+
+    Raises:
+        ValueError: If the identifier contains invalid characters.
+    """
+    if not _SQL_IDENTIFIER_PATTERN.match(name):
+        raise ValueError(
+            f"Invalid SQL {identifier_type}: '{name}'. "
+            f"Must start with letter/underscore and contain only alphanumeric/underscore characters."
+        )
+    return name
 
 
 class SnowflakeConnector(BaseConnector):
@@ -116,11 +141,12 @@ class SnowflakeConnector(BaseConnector):
             self.authenticate()
 
         params = self.config.connection_params
-        table = params.get("table", "TRANSACTIONS")
-        ts_col = params.get("timestamp_column", "UPDATED_AT")
+        # Validate identifiers to prevent SQL injection
+        table = _validate_identifier(params.get("table", "TRANSACTIONS"), "table")
+        ts_col = _validate_identifier(params.get("timestamp_column", "UPDATED_AT"), "column")
 
-        # Build query with parameterized values to prevent SQL injection
-        query = f"SELECT * FROM {table}"  # table name from config, not user input
+        # Build query with validated identifiers and parameterized values
+        query = f"SELECT * FROM {table}"
         conditions = []
         query_params = []
 
@@ -150,7 +176,7 @@ class SnowflakeConnector(BaseConnector):
             columns = [desc[0] for desc in cursor.description]
 
             for row in cursor:
-                yield dict(zip(columns, row, strict=False))
+                yield dict(zip(columns, row, strict=True))
         finally:
             cursor.close()
 
@@ -167,7 +193,8 @@ class SnowflakeConnector(BaseConnector):
             self.authenticate()
 
         params = self.config.connection_params
-        table = params.get("table", "TRANSACTIONS")
+        # Validate identifier to prevent SQL injection
+        table = _validate_identifier(params.get("table", "TRANSACTIONS"), "table")
 
         cursor = self._client.cursor()
         try:

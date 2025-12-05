@@ -361,7 +361,7 @@ class OnboardingOrchestrator:
                         )
                     except Exception as ds_error:
                         result.status = OnboardingStatus.FAILED
-                        result.errors.append(f"Failed to configure data sources: {type(ds_error).__name__}")
+                        result.errors.append(f"Failed to configure data sources: {ds_error}")
                         result.completed_at = datetime.now(UTC)
                         logger.exception(
                             "Data source configuration failed",
@@ -380,10 +380,12 @@ class OnboardingOrchestrator:
                                     request.customer_id, {"status": CustomerStatus.INACTIVE.value}
                                 )
                             except Exception as reg_rollback_error:
+                                rollback_msg = f"Registry rollback failed: {reg_rollback_error}"
                                 logger.error(
-                                    f"Registry rollback failed for {request.customer_id}: {reg_rollback_error}. "
+                                    f"{rollback_msg} for {request.customer_id}. "
                                     f"Manual cleanup may be required."
                                 )
+                                result.errors.append(rollback_msg)
                         return result
 
             # Success
