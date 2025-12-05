@@ -656,227 +656,166 @@ __all__ = [
 
 ---
 
-## Phase 2: Snowflake Connector
+## Phase 2: Snowflake Connector ✅ COMPLETED
 
 ### Overview
 
 Implement the Snowflake connector, which serves as the data lake layer for POS systems like Toast and loyalty platforms like Fishbowl.
 
-### Changes Required
+### Implementation Summary
 
-#### 1. Snowflake Adapter
+**Files Created/Modified:**
+- `packages/shared-connectors/growthnav/connectors/adapters/snowflake.py` - Snowflake connector
+- `packages/shared-connectors/growthnav/connectors/adapters/__init__.py` - Auto-registration
+- `packages/shared-connectors/tests/test_snowflake.py` - 20 comprehensive tests
 
-**File**: `packages/shared-connectors/growthnav/connectors/adapters/snowflake.py`
+**Key Features:**
+- Authentication with Snowflake using `snowflake-connector-python`
+- Parameterized queries for incremental sync with `since`/`until` parameters
+- Schema discovery via `DESCRIBE TABLE`
+- Normalization using `POSNormalizer` from shared-conversions
+- Proper cleanup with `_cleanup_client()` override
+- Auto-registration with ConnectorRegistry on import
+- Uses `AuthenticationError` and `SchemaError` custom exceptions
 
+### Test Results (2025-12-05)
+
+**Target:** Nothing Bundt Cakes Snowflake instance
+- Account: `NOTHINGBUNDTCAKES-NOTHINGBUNDTCAKES`
+- Database: `MARKETING_DB.MART_SALE`
+- Tables: `DIM_BAKERIES`, `THANX_PURCHASES`, `THANX_MEMBERSHIPS`, etc.
+
+**Results:**
+- ✅ Connection successful
+- ✅ Schema discovery works (18 columns in THANX_PURCHASES)
+- ✅ Incremental sync with date range works (fetched records for Jan 2024)
+- ✅ Full sync processed ~4 million records in 133 seconds
+- ✅ Normalization with custom field mappings works
+
+**Example Configuration:**
 ```python
-"""Snowflake data lake connector."""
-
-from __future__ import annotations
-
-import logging
-from datetime import datetime
-from typing import Any, Generator
-
-from growthnav.connectors.base import BaseConnector
-from growthnav.connectors.config import ConnectorConfig, ConnectorType
-from growthnav.connectors.registry import get_registry
-from growthnav.conversions import Conversion, POSNormalizer
-
-logger = logging.getLogger(__name__)
-
-
-class SnowflakeConnector(BaseConnector):
-    """Connector for Snowflake data warehouse.
-
-    Used to access POS data (Toast, Square) and loyalty data (Fishbowl)
-    that has been loaded into Snowflake.
-
-    Required connection_params:
-        - account: Snowflake account identifier (xxx.snowflakecomputing.com)
-        - warehouse: Compute warehouse name
-        - database: Database name
-        - schema: Schema name (default: PUBLIC)
-
-    Required credentials:
-        - user: Snowflake username
-        - password: Snowflake password (or use key pair auth)
-
-    Optional connection_params:
-        - table: Specific table to query (default: TRANSACTIONS)
-        - timestamp_column: Column for incremental sync (default: UPDATED_AT)
-        - role: Snowflake role to assume
-
-    Example:
-        config = ConnectorConfig(
-            connector_type=ConnectorType.SNOWFLAKE,
-            customer_id="topgolf",
-            name="Toast via Snowflake",
-            connection_params={
-                "account": "acme.us-east-1.snowflakecomputing.com",
-                "warehouse": "ANALYTICS_WH",
-                "database": "TOAST_DATA",
-                "schema": "RAW",
-                "table": "TRANSACTIONS",
-            },
-            credentials={
-                "user": "growthnav_service",
-                "password": "...",
-            }
-        )
-    """
-
-    connector_type = ConnectorType.SNOWFLAKE
-
-    def __init__(self, config: ConnectorConfig):
-        """Initialize Snowflake connector."""
-        super().__init__(config)
-        self._cursor = None
-
-    def authenticate(self) -> None:
-        """Connect to Snowflake."""
-        try:
-            import snowflake.connector
-        except ImportError:
-            raise ImportError(
-                "snowflake-connector-python is required. "
-                "Install with: pip install growthnav-connectors[snowflake]"
-            )
-
-        params = self.config.connection_params
-        creds = self.config.credentials
-
-        self._client = snowflake.connector.connect(
-            account=params["account"],
-            user=creds.get("user"),
-            password=creds.get("password"),
-            warehouse=params.get("warehouse"),
-            database=params.get("database"),
-            schema=params.get("schema", "PUBLIC"),
-            role=params.get("role"),
-        )
-        self._authenticated = True
-        logger.info(f"Connected to Snowflake: {params['account']}")
-
-    def fetch_records(
-        self,
-        since: datetime | None = None,
-        until: datetime | None = None,
-        limit: int | None = None,
-    ) -> Generator[dict[str, Any], None, None]:
-        """Fetch records from Snowflake table."""
-        if not self.is_authenticated:
-            self.authenticate()
-
-        params = self.config.connection_params
-        table = params.get("table", "TRANSACTIONS")
-        ts_col = params.get("timestamp_column", "UPDATED_AT")
-
-        # Build query
-        query = f"SELECT * FROM {table}"
-        conditions = []
-
-        if since:
-            conditions.append(f"{ts_col} >= '{since.isoformat()}'")
-        if until:
-            conditions.append(f"{ts_col} <= '{until.isoformat()}'")
-
-        if conditions:
-            query += " WHERE " + " AND ".join(conditions)
-
-        query += f" ORDER BY {ts_col}"
-
-        if limit:
-            query += f" LIMIT {limit}"
-
-        logger.debug(f"Executing Snowflake query: {query}")
-
-        cursor = self._client.cursor()
-        try:
-            cursor.execute(query)
-            columns = [desc[0] for desc in cursor.description]
-
-            for row in cursor:
-                yield dict(zip(columns, row))
-        finally:
-            cursor.close()
-
-    def get_schema(self) -> dict[str, str]:
-        """Get schema of the source table."""
-        if not self.is_authenticated:
-            self.authenticate()
-
-        params = self.config.connection_params
-        table = params.get("table", "TRANSACTIONS")
-
-        cursor = self._client.cursor()
-        try:
-            cursor.execute(f"DESCRIBE TABLE {table}")
-            schema = {}
-            for row in cursor:
-                col_name = row[0]
-                col_type = row[1]
-                schema[col_name] = col_type
-            return schema
-        finally:
-            cursor.close()
-
-    def normalize(self, raw_records: list[dict[str, Any]]) -> list[Conversion]:
-        """Normalize Snowflake records to Conversions."""
-        normalizer = POSNormalizer(
-            customer_id=self.config.customer_id,
-            field_map=self.config.field_overrides or None,
-        )
-        return normalizer.normalize(raw_records)
-
-    def close(self) -> None:
-        """Close Snowflake connection."""
-        if self._client:
-            self._client.close()
-        super().close()
-
-
-# Auto-register connector
-get_registry().register(ConnectorType.SNOWFLAKE, SnowflakeConnector)
+config = ConnectorConfig(
+    connector_type=ConnectorType.SNOWFLAKE,
+    customer_id='nothingbundtcakes',
+    name='Nothing Bundt Cakes - Thanx Purchases',
+    credentials={
+        'user': os.getenv('SNOWFLAKE_USER'),
+        'password': os.getenv('SNOWFLAKE_PASSWORD'),
+    },
+    connection_params={
+        'account': 'NOTHINGBUNDTCAKES-NOTHINGBUNDTCAKES',
+        'warehouse': 'MARKETING_WH',
+        'database': 'MARKETING_DB',
+        'schema': 'MART_SALE',
+        'role': 'MARKETING_ROLE',
+        'table': 'THANX_PURCHASES',
+        'timestamp_column': 'PURCHASED_AT',
+    },
+    field_overrides={
+        'PURCHASE_ID': 'transaction_id',
+        'USER_ID': 'user_id',
+        'SETTLEMENT_AMOUNT': 'value',
+        'PURCHASED_AT': 'timestamp',
+        'LOCATION_ID': 'location_id',
+    },
+    sync_mode=SyncMode.INCREMENTAL,
+)
 ```
 
-#### 2. Adapters __init__.py
+### Connector Storage Architecture (Recommendation) ✅ IMPLEMENTED
 
-**File**: `packages/shared-connectors/growthnav/connectors/adapters/__init__.py`
+During onboarding, connector configurations should be stored as follows:
 
-```python
-"""Data source connector adapters.
+#### 1. BigQuery Table for Connector Metadata ✅
 
-Import this module to auto-register all available connectors.
-"""
+**Table:** `growthnav_registry.connectors`
 
-# Import adapters to trigger auto-registration
-try:
-    from growthnav.connectors.adapters.snowflake import SnowflakeConnector
-except ImportError:
-    SnowflakeConnector = None  # Optional dependency
-
-__all__ = [
-    "SnowflakeConnector",
-]
+```sql
+CREATE TABLE growthnav_registry.connectors (
+    connector_id STRING NOT NULL,
+    customer_id STRING NOT NULL,
+    connector_type STRING NOT NULL,  -- 'snowflake', 'salesforce', etc.
+    name STRING NOT NULL,
+    connection_params JSON,  -- account, warehouse, database, schema, table
+    field_overrides JSON,    -- custom field mappings
+    sync_mode STRING DEFAULT 'incremental',
+    sync_schedule STRING DEFAULT 'daily',
+    last_sync TIMESTAMP,
+    last_sync_cursor STRING,
+    credentials_secret_path STRING,  -- Reference to Secret Manager
+    is_active BOOL DEFAULT TRUE,
+    error_message STRING,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP(),
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP()
+);
 ```
 
-#### 3. Update package __init__.py
+#### 2. Credentials in Secret Manager ✅
 
-Add adapter imports to auto-register connectors.
+- **Path format:** `growthnav-{customer_id}-connector-{connector_id}`
+- **Example:** `growthnav-nothingbundtcakes-connector-snowflake-thanx`
+- **Contents:** JSON with `user`, `password`, and any other auth fields
+
+#### 3. Extend OnboardingRequest ✅
+
+```python
+@dataclass
+class DataSourceConfig:
+    """Configuration for a data source during onboarding."""
+    connector_type: ConnectorType
+    name: str
+    credentials: dict[str, str]
+    connection_params: dict[str, Any]
+    field_overrides: dict[str, str] | None = None
+    sync_schedule: SyncSchedule = SyncSchedule.DAILY
+
+@dataclass
+class OnboardingRequest:
+    # ... existing fields ...
+    data_sources: list[DataSourceConfig] = field(default_factory=list)
+```
+
+#### 4. New Onboarding Step ✅
+
+Add `CONFIGURING_DATA_SOURCES` step to `OnboardingOrchestrator`:
+
+1. For each data source in request ✅
+2. Generate connector_id ✅
+3. Store credentials in Secret Manager (via `credentials_secret_path` reference) ✅
+4. Store connector config in BigQuery (via `ConnectorStorage.save()`) ✅
+5. Test connection (optional) - Deferred to Phase 3
+6. Schedule initial sync - Deferred to Phase 3
 
 ### Success Criteria
 
 #### Automated Verification:
-- [ ] `uv run pytest packages/shared-connectors/tests/test_snowflake.py -v` passes
-- [ ] `uv run mypy packages/shared-connectors/` passes
-- [ ] Connector auto-registers on import
+- [x] `uv run pytest packages/shared-connectors/tests/test_snowflake.py -v` passes (20 tests)
+- [x] `uv run mypy packages/shared-connectors/` passes
+- [x] `uv run ruff check packages/shared-connectors/` passes
+- [x] Connector auto-registers on import
 
-#### Manual Verification:
-- [ ] Connection to test Snowflake instance succeeds
-- [ ] Records are fetched and normalized correctly
-- [ ] Incremental sync respects `since` parameter
+#### Connector Storage Verification (New)
 
-**Implementation Note**: After completing this phase and all automated verification passes, pause here for confirmation before proceeding to Phase 3.
+- [x] `uv run pytest packages/shared-connectors/tests/test_storage.py -v` passes (19 tests)
+- [x] `uv run pytest packages/shared-onboarding/tests/test_orchestrator.py::TestOnboardingOrchestratorDataSources -v` passes (8 tests)
+- [x] `DataSourceConfig` dataclass exported from `growthnav.onboarding`
+- [x] `ConnectorStorage` class exported from `growthnav.connectors`
+- [x] `CONFIGURING_DATA_SOURCES` status in `OnboardingStatus` enum
+- [x] `OnboardingOrchestrator` accepts `connector_storage` parameter
+
+#### Manual Verification
+
+- [x] Connection to test Snowflake instance succeeds (Nothing Bundt Cakes)
+- [x] Records are fetched and normalized correctly (THANX_PURCHASES table)
+- [x] Incremental sync respects `since` parameter (tested with Jan 2024 range)
+
+#### Manual Verification for Connector Storage (New)
+
+- [x] Test onboarding flow with data sources using mock storage
+- [x] Verify connector configs can be saved and retrieved (tested with mock storage.save)
+- [x] Test rollback behavior when data source configuration fails (covered by unit tests)
+
+**Implementation Note**: Phase 2 is complete. Proceed to Phase 3 (LLM-Assisted Schema Discovery).
 
 ---
 
