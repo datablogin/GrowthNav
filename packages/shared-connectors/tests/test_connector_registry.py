@@ -25,15 +25,16 @@ class TestConnectorRegistry:
 
     def test_register_connector(self, fresh_registry, mock_connector) -> None:
         """Test registering a connector type."""
-        from tests.conftest import MockConnector
+        # Use the class of the mock_connector fixture
+        MockConnector = type(mock_connector)
 
         fresh_registry.register(ConnectorType.SNOWFLAKE, MockConnector)
 
         assert fresh_registry.is_registered(ConnectorType.SNOWFLAKE)
 
-    def test_unregister_connector(self, fresh_registry) -> None:
+    def test_unregister_connector(self, fresh_registry, mock_connector) -> None:
         """Test unregistering a connector type."""
-        from tests.conftest import MockConnector
+        MockConnector = type(mock_connector)
 
         fresh_registry.register(ConnectorType.SNOWFLAKE, MockConnector)
         assert fresh_registry.is_registered(ConnectorType.SNOWFLAKE)
@@ -47,9 +48,9 @@ class TestConnectorRegistry:
         fresh_registry.unregister(ConnectorType.SALESFORCE)
         # Should not raise
 
-    def test_get_connector_class(self, fresh_registry) -> None:
+    def test_get_connector_class(self, fresh_registry, mock_connector) -> None:
         """Test getting a registered connector class."""
-        from tests.conftest import MockConnector
+        MockConnector = type(mock_connector)
 
         fresh_registry.register(ConnectorType.HUBSPOT, MockConnector)
 
@@ -62,9 +63,9 @@ class TestConnectorRegistry:
         result = fresh_registry.get(ConnectorType.ZOHO)
         assert result is None
 
-    def test_create_connector(self, fresh_registry, connector_config) -> None:
+    def test_create_connector(self, fresh_registry, connector_config, mock_connector) -> None:
         """Test creating a connector instance."""
-        from tests.conftest import MockConnector
+        MockConnector = type(mock_connector)
 
         fresh_registry.register(ConnectorType.SNOWFLAKE, MockConnector)
 
@@ -86,9 +87,9 @@ class TestConnectorRegistry:
         available = fresh_registry.list_available()
         assert available == []
 
-    def test_list_available_with_connectors(self, fresh_registry) -> None:
+    def test_list_available_with_connectors(self, fresh_registry, mock_connector) -> None:
         """Test listing registered connector types."""
-        from tests.conftest import MockConnector
+        MockConnector = type(mock_connector)
 
         fresh_registry.register(ConnectorType.SNOWFLAKE, MockConnector)
         fresh_registry.register(ConnectorType.SALESFORCE, MockConnector)
@@ -99,9 +100,9 @@ class TestConnectorRegistry:
         assert ConnectorType.SNOWFLAKE in available
         assert ConnectorType.SALESFORCE in available
 
-    def test_is_registered_true(self, fresh_registry) -> None:
+    def test_is_registered_true(self, fresh_registry, mock_connector) -> None:
         """Test is_registered returns True for registered types."""
-        from tests.conftest import MockConnector
+        MockConnector = type(mock_connector)
 
         fresh_registry.register(ConnectorType.TOAST, MockConnector)
 

@@ -37,15 +37,29 @@ from growthnav.connectors.config import (
     SyncResult,
     SyncSchedule,
 )
+from growthnav.connectors.exceptions import (
+    AuthenticationError,
+    ConnectorError,
+    SchemaError,
+    SyncError,
+)
 from growthnav.connectors.registry import ConnectorRegistry, get_registry
 
 __all__ = [
+    # Base
     "BaseConnector",
+    # Config
     "ConnectorConfig",
-    "ConnectorRegistry",
     "ConnectorType",
     "SyncMode",
     "SyncResult",
     "SyncSchedule",
+    # Exceptions
+    "AuthenticationError",
+    "ConnectorError",
+    "SchemaError",
+    "SyncError",
+    # Registry
+    "ConnectorRegistry",
     "get_registry",
 ]

@@ -132,8 +132,8 @@ class TestBaseConnector:
         connector_config.last_sync = last_sync
         connector_config.sync_mode = SyncMode.INCREMENTAL
 
-        # Create new connector with updated config
-        from tests.conftest import MockConnector
+        # Create new connector with updated config using the fixture's class type
+        MockConnector = type(mock_connector)
         connector = MockConnector(connector_config)
         connector.set_mock_records([{"id": 1}])
 

@@ -60,9 +60,9 @@ class ConnectorConfig:
     customer_id: str
     name: str  # Human-readable name for this connection
 
-    # Authentication
+    # Authentication (repr=False to prevent credential exposure in logs)
     credentials_secret_path: str | None = None  # Secret Manager path
-    credentials: dict[str, Any] = field(default_factory=dict)  # Direct credentials
+    credentials: dict[str, Any] = field(default_factory=dict, repr=False)
 
     # Connection settings
     connection_params: dict[str, Any] = field(default_factory=dict)

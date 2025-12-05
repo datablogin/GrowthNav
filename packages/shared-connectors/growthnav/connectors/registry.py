@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from threading import Lock
 from typing import TYPE_CHECKING
 
 from growthnav.connectors.config import ConnectorConfig, ConnectorType
@@ -16,7 +17,7 @@ logger = logging.getLogger(__name__)
 class ConnectorRegistry:
     """Registry of available connector implementations.
 
-    Singleton pattern for global connector type registration.
+    Thread-safe singleton pattern for global connector type registration.
 
     Example:
         # Register a connector type
@@ -33,13 +34,17 @@ class ConnectorRegistry:
     """
 
     _instance: ConnectorRegistry | None = None
+    _lock: Lock = Lock()
     _connectors: dict[ConnectorType, type[BaseConnector]]
 
     def __new__(cls) -> ConnectorRegistry:
-        """Singleton pattern."""
+        """Thread-safe singleton pattern using double-checked locking."""
         if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._connectors = {}
+            with cls._lock:
+                # Double-check after acquiring lock
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance._connectors = {}
         return cls._instance
 
     def register(
