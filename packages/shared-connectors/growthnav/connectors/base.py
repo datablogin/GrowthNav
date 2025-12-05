@@ -100,7 +100,7 @@ class BaseConnector(ABC):
         Raises:
             AuthenticationError: If authentication fails.
         """
-        pass
+        pass  # pragma: no cover
 
     @abstractmethod
     def fetch_records(
@@ -119,7 +119,7 @@ class BaseConnector(ABC):
         Yields:
             Raw record dictionaries from the source system.
         """
-        pass
+        pass  # pragma: no cover
 
     @abstractmethod
     def get_schema(self) -> dict[str, str]:
@@ -128,7 +128,7 @@ class BaseConnector(ABC):
         Returns:
             Dictionary mapping column names to data types.
         """
-        pass
+        pass  # pragma: no cover
 
     @abstractmethod
     def normalize(self, raw_records: list[dict[str, Any]]) -> list[Conversion]:
@@ -140,7 +140,7 @@ class BaseConnector(ABC):
         Returns:
             List of normalized Conversion objects.
         """
-        pass
+        pass  # pragma: no cover
 
     def _cleanup_client(self) -> None:  # noqa: B027
         """Clean up the client connection.
