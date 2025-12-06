@@ -10,7 +10,6 @@ dependencies = [
     "tenacity>=8.0.0",
     "python-dateutil>=2.8.0",
     "pydantic>=2.0.0",
-    "anthropic>=0.75.0",
 ]
 
 [project.optional-dependencies]
@@ -18,7 +17,7 @@ snowflake = ["snowflake-connector-python>=4.1.1"]
 salesforce = ["simple-salesforce>=1.12.0"]
 hubspot = ["hubspot-api-client>=9.0.0"]
 identity = ["splink>=4.0.0"]
-llm = ["anthropic>=0.40.0"]
+llm = ["anthropic>=0.75.0"]
 all = [
     "growthnav-connectors[snowflake,salesforce,hubspot,identity,llm]",
 ]

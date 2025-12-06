@@ -198,6 +198,12 @@ class TestColumnProfiler:
         inferred_type = profiler._infer_type(values)
         assert inferred_type == "number"
 
+    def test_is_numeric_with_bool(self, profiler: ColumnProfiler) -> None:
+        """Test _is_numeric returns False for boolean values."""
+        # Booleans are not numeric even though they subclass int in Python
+        assert profiler._is_numeric(True) is False
+        assert profiler._is_numeric(False) is False
+
     def test_is_numeric_with_int(self, profiler: ColumnProfiler) -> None:
         """Test _is_numeric with integer."""
         assert profiler._is_numeric(42) is True

@@ -1093,7 +1093,6 @@ name = "growthnav-connectors"
 version = "0.1.0"
 source = { editable = "packages/shared-connectors" }
 dependencies = [
-    { name = "anthropic" },
     { name = "growthnav-bigquery" },
     { name = "growthnav-conversions" },
     { name = "httpx" },
@@ -1128,8 +1127,7 @@ snowflake = [
 
 [package.metadata]
 requires-dist = [
-    { name = "anthropic", specifier = ">=0.75.0" },
-    { name = "anthropic", marker = "extra == 'llm'", specifier = ">=0.40.0" },
+    { name = "anthropic", marker = "extra == 'llm'", specifier = ">=0.75.0" },
     { name = "growthnav-bigquery", editable = "packages/shared-bigquery" },
     { name = "growthnav-connectors", extras = ["snowflake", "salesforce", "hubspot", "identity", "llm"], marker = "extra == 'all'" },
     { name = "growthnav-conversions", editable = "packages/shared-conversions" },

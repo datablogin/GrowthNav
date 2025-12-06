@@ -50,6 +50,28 @@ class TestMappingSuggestion:
 
         assert suggestion.target_field is None
 
+    def test_confidence_validation_rejects_above_one(self) -> None:
+        """Test __post_init__ rejects confidence > 1.0."""
+        with pytest.raises(ValueError, match="Confidence must be between 0.0 and 1.0"):
+            MappingSuggestion(
+                source_field="test",
+                target_field="value",
+                confidence=1.5,
+                reason="Too confident",
+                sample_values=[],
+            )
+
+    def test_confidence_validation_rejects_below_zero(self) -> None:
+        """Test __post_init__ rejects confidence < 0.0."""
+        with pytest.raises(ValueError, match="Confidence must be between 0.0 and 1.0"):
+            MappingSuggestion(
+                source_field="test",
+                target_field="value",
+                confidence=-0.1,
+                reason="Negative confidence",
+                sample_values=[],
+            )
+
 
 class TestLLMSchemaMapper:
     """Tests for LLMSchemaMapper class."""
@@ -88,13 +110,46 @@ class TestLLMSchemaMapper:
         mock_anthropic_class.return_value = mock_client
 
         # The mapper imports Anthropic inside the property, so we patch the import
-        with patch.dict(
-            "sys.modules", {"anthropic": MagicMock(Anthropic=mock_anthropic_class)}
+        with (
+            patch.dict(
+                "sys.modules", {"anthropic": MagicMock(Anthropic=mock_anthropic_class)}
+            ),
+            patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}),
         ):
             mapper._client = None  # Reset to trigger lazy init
             client = mapper.client
 
             assert client is mock_client
+
+    def test_client_property_raises_value_error_when_api_key_missing(self) -> None:
+        """Test client property raises ValueError when ANTHROPIC_API_KEY not set."""
+        mapper = LLMSchemaMapper()
+
+        mock_anthropic_module = MagicMock()
+        mock_anthropic_module.Anthropic = MagicMock()
+
+        with (
+            patch.dict("sys.modules", {"anthropic": mock_anthropic_module}),
+            patch.dict("os.environ", {}, clear=True),
+            patch("os.getenv", return_value=None),
+            pytest.raises(ValueError, match="ANTHROPIC_API_KEY environment variable not set"),
+        ):
+            _ = mapper.client
+
+    def test_init_accepts_model_parameter(self) -> None:
+        """Test __init__ accepts and stores model parameter."""
+        custom_model = "claude-3-opus-20240229"
+        mapper = LLMSchemaMapper(model=custom_model)
+
+        assert mapper._model == custom_model
+
+    def test_init_uses_default_model(self) -> None:
+        """Test __init__ uses DEFAULT_MODEL when no model provided."""
+        from growthnav.connectors.discovery.mapper import DEFAULT_MODEL
+
+        mapper = LLMSchemaMapper()
+
+        assert mapper._model == DEFAULT_MODEL
 
     def test_build_prompt_includes_source_profiles(self) -> None:
         """Test _build_prompt includes source column profiles."""
@@ -273,6 +328,98 @@ class TestLLMSchemaMapper:
         assert len(suggestions) == 1
         assert suggestions[0].sample_values == []  # No profile found
 
+    def test_parse_response_handles_markdown_code_fence(self) -> None:
+        """Test _parse_response correctly strips markdown code fences."""
+        mapper = LLMSchemaMapper()
+        profiles = {
+            "order_id": ColumnProfile(
+                name="order_id",
+                inferred_type="string",
+                total_count=1,
+                null_count=0,
+                unique_count=1,
+                sample_values=["ORD-001"],
+            ),
+        }
+
+        # Response with markdown code fence
+        response_text = """```json
+[
+    {
+        "source_field": "order_id",
+        "target_field": "transaction_id",
+        "confidence": 0.95,
+        "reason": "Direct ID mapping"
+    }
+]
+```"""
+
+        suggestions = mapper._parse_response(response_text, profiles)
+
+        assert len(suggestions) == 1
+        assert suggestions[0].source_field == "order_id"
+        assert suggestions[0].target_field == "transaction_id"
+
+    def test_parse_response_handles_markdown_fence_without_closing(self) -> None:
+        """Test _parse_response handles markdown fence without proper closing."""
+        mapper = LLMSchemaMapper()
+        profiles = {}
+
+        # Response with code fence but no closing backticks
+        response_text = """```json
+[
+    {
+        "source_field": "test_field",
+        "target_field": "value",
+        "confidence": 0.8,
+        "reason": "Test"
+    }
+]
+"""
+
+        suggestions = mapper._parse_response(response_text, profiles)
+
+        assert len(suggestions) == 1
+        assert suggestions[0].source_field == "test_field"
+
+    def test_parse_response_clamps_high_confidence(self) -> None:
+        """Test _parse_response clamps confidence values > 1.0."""
+        mapper = LLMSchemaMapper()
+        profiles = {}
+
+        response_text = """[
+            {
+                "source_field": "test_field",
+                "target_field": "value",
+                "confidence": 1.5,
+                "reason": "Over-confident LLM"
+            }
+        ]"""
+
+        suggestions = mapper._parse_response(response_text, profiles)
+
+        assert len(suggestions) == 1
+        assert suggestions[0].confidence == 1.0  # Clamped to 1.0
+
+    def test_parse_response_clamps_negative_confidence(self) -> None:
+        """Test _parse_response clamps confidence values < 0.0."""
+        mapper = LLMSchemaMapper()
+        profiles = {}
+
+        response_text = """[
+            {
+                "source_field": "test_field",
+                "target_field": "value",
+                "confidence": -0.5,
+                "reason": "Negative confidence"
+            }
+        ]"""
+
+        suggestions = mapper._parse_response(response_text, profiles)
+
+        assert len(suggestions) == 1
+        assert suggestions[0].confidence == 0.0  # Clamped to 0.0
+
     def test_target_schema_has_required_clv_fields(self) -> None:
         """Test TARGET_SCHEMA has required CLV fields."""
         mapper = LLMSchemaMapper()
@@ -335,6 +482,18 @@ class TestSchemaDiscovery:
 
         assert isinstance(discovery._profiler, ColumnProfiler)
         assert isinstance(discovery._mapper, LLMSchemaMapper)
+
+    @pytest.mark.asyncio
+    async def test_analyze_empty_data_returns_empty_result(self) -> None:
+        """Test analyze returns empty result structure for empty data."""
+        discovery = SchemaDiscovery()
+
+        result = await discovery.analyze([])
+
+        assert result["profiles"] == {}
+        assert result["suggestions"] == []
+        assert result["field_map"] == {}
+        assert result["confidence_summary"] == {"high": 0, "medium": 0, "low": 0, "unmapped": 0}
 
     @pytest.mark.asyncio
     async def test_analyze_returns_correct_structure(self) -> None:

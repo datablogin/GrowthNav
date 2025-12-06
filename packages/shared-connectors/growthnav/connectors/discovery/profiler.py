@@ -71,15 +71,20 @@ class ColumnProfiler:
         print(profiles["age"].inferred_type)  # "number"
     """
 
-    # Regex patterns for common data formats
+    # Regex patterns for common data formats (compiled for performance)
     PATTERNS = {
-        "email": r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$",
-        "phone": r"^[\+]?[(]?[0-9]{1,4}[)]?[-\s\.]?[(]?[0-9]{1,4}[)]?[-\s\.]?[0-9]{1,9}$",
-        "currency": r"^\$?\d+(\.\d{2})?$",
-        "date_iso": r"^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2})?",
-        "uuid": r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-        "gclid": r"^[A-Za-z0-9_-]{20,}$",
-        "url": r"^https?://[^\s/$.?#].[^\s]*$",
+        "email": re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"),
+        "phone": re.compile(
+            r"^[\+]?[(]?[0-9]{1,4}[)]?[-\s\.]?[(]?[0-9]{1,4}[)]?[-\s\.]?[0-9]{1,9}$"
+        ),
+        "currency": re.compile(r"^\$?\d+(\.\d{2})?$"),
+        "date_iso": re.compile(r"^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2})?"),
+        "uuid": re.compile(
+            r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            re.IGNORECASE,
+        ),
+        "gclid": re.compile(r"^[A-Za-z0-9_-]{20,}$"),
+        "url": re.compile(r"^https?://[^\s/$.?#].[^\s]*$"),
     }
 
     def profile(
@@ -261,17 +266,19 @@ class ColumnProfiler:
         if not values:
             return []
 
-        detected = []
         total = len(values)
         threshold = 0.5
 
-        for pattern_name, pattern_regex in self.PATTERNS.items():
-            matches = 0
-            for value in values:
-                if isinstance(value, str) and re.match(pattern_regex, value):
-                    matches += 1
+        # Count matches for each pattern in a single pass through values
+        pattern_counts: dict[str, int] = {name: 0 for name in self.PATTERNS}
 
-            if matches / total > threshold:
-                detected.append(pattern_name)
+        for value in values:
+            if isinstance(value, str):
+                for pattern_name, pattern_regex in self.PATTERNS.items():
+                    if pattern_regex.match(value):
+                        pattern_counts[pattern_name] += 1
 
-        return detected
+        # Return patterns that exceed threshold
+        return [
+            name for name, count in pattern_counts.items() if count / total > threshold
+        ]

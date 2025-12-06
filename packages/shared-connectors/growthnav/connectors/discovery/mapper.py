@@ -9,12 +9,16 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from dataclasses import dataclass
 from typing import Any
 
 from growthnav.connectors.discovery.profiler import ColumnProfile, ColumnProfiler
 
 logger = logging.getLogger(__name__)
+
+# Default model for LLM schema mapping
+DEFAULT_MODEL = "claude-sonnet-4-20250514"
 
 
 @dataclass
@@ -77,14 +81,20 @@ class LLMSchemaMapper:
         "utm_campaign": "UTM campaign parameter for attribution",
     }
 
-    def __init__(self, anthropic_client: Any | None = None) -> None:
+    def __init__(
+        self,
+        anthropic_client: Any | None = None,
+        model: str = DEFAULT_MODEL,
+    ) -> None:
         """Initialize the schema mapper.
 
         Args:
             anthropic_client: Optional pre-configured Anthropic client.
                 If None, will be lazy-initialized when needed.
+            model: Model to use for LLM requests. Defaults to DEFAULT_MODEL.
         """
         self._client = anthropic_client
+        self._model = model
 
     @property
     def client(self) -> Any:
@@ -95,12 +105,19 @@ class LLMSchemaMapper:
 
         Raises:
             ImportError: If anthropic package is not installed.
+            ValueError: If ANTHROPIC_API_KEY environment variable is not set.
         """
         if self._client is None:
             try:
                 from anthropic import Anthropic
 
-                self._client = Anthropic()
+                api_key = os.getenv("ANTHROPIC_API_KEY")
+                if not api_key:
+                    raise ValueError(
+                        "ANTHROPIC_API_KEY environment variable not set. "
+                        "Required for LLM schema mapping."
+                    )
+                self._client = Anthropic(api_key=api_key)
                 logger.debug("Initialized Anthropic client for schema mapping")
             except ImportError as e:
                 raise ImportError(
@@ -137,7 +154,7 @@ class LLMSchemaMapper:
 
         # Call Claude
         response = self.client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model=self._model,
             max_tokens=4096,
             messages=[{"role": "user", "content": prompt}],
         )
@@ -251,9 +268,14 @@ Respond with ONLY the JSON array, no other text."""
             # Extract JSON from response (handle markdown code blocks)
             json_text = response_text.strip()
             if json_text.startswith("```"):
-                # Remove markdown code fence
+                # Remove markdown code fence - handle both opening and closing
                 lines = json_text.split("\n")
-                json_text = "\n".join(lines[1:-1])
+                # Remove first line (opening fence like ```json or ```)
+                lines = lines[1:]
+                # Remove last line if it's a closing fence
+                if lines and lines[-1].strip().startswith("```"):
+                    lines = lines[:-1]
+                json_text = "\n".join(lines)
 
             suggestions_data = json.loads(json_text)
 
@@ -262,10 +284,18 @@ Respond with ONLY the JSON array, no other text."""
                 source_field = item["source_field"]
                 profile = profiles.get(source_field)
 
+                # Clamp confidence to valid range [0.0, 1.0]
+                raw_confidence = float(item["confidence"])
+                confidence = max(0.0, min(1.0, raw_confidence))
+                if confidence != raw_confidence:
+                    logger.warning(
+                        f"Clamped confidence for {source_field} from {raw_confidence} to {confidence}"
+                    )
+
                 suggestion = MappingSuggestion(
                     source_field=source_field,
                     target_field=item.get("target_field"),
-                    confidence=float(item["confidence"]),
+                    confidence=confidence,
                     reason=item["reason"],
                     sample_values=profile.sample_values if profile else [],
                 )
