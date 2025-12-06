@@ -152,6 +152,12 @@ class IdentityLinker:
         Extracts only digits and keeps the last 10 for US phone numbers.
         Phone numbers with fewer than 10 digits are rejected as invalid.
 
+        Note:
+            This implementation is US-centric, expecting 10-digit phone numbers.
+            International phone numbers (e.g., UK +44, AU +61) may not normalize
+            correctly. For international support, consider using the phonenumbers
+            library in a future enhancement.
+
         Args:
             record: Raw record dictionary.
 
@@ -320,6 +326,13 @@ class IdentityLinker:
 
         Returns:
             List of ResolvedIdentity objects with unique fragments.
+
+        Note:
+            Fragment deduplication uses "first-wins" strategy: when the same
+            identity value (e.g., email) appears in multiple source systems,
+            only the first occurrence is kept. The source_system field will
+            reflect whichever source was processed first. Records are processed
+            in the order they appear in the cluster DataFrame.
         """
         # Group records by cluster ID
         clusters = defaultdict(list)
@@ -374,11 +387,11 @@ class IdentityLinker:
                 if first_name or last_name:
                     name = f"{first_name} {last_name}".strip()
                     if name:  # Only add if not empty after strip
-                        key = (IdentityType.NAME_ZIP, name)
+                        key = (IdentityType.FULL_NAME, name)
                         if key not in seen_values:
                             fragments.append(
                                 IdentityFragment(
-                                    fragment_type=IdentityType.NAME_ZIP,
+                                    fragment_type=IdentityType.FULL_NAME,
                                     fragment_value=name,
                                     source_system=source,
                                 )
@@ -565,11 +578,11 @@ class IdentityLinker:
                 if first_name or last_name:
                     name = f"{first_name} {last_name}".strip()
                     if name:  # Only add if not empty after strip
-                        key = (IdentityType.NAME_ZIP, name)
+                        key = (IdentityType.FULL_NAME, name)
                         if key not in seen_values:
                             fragments.append(
                                 IdentityFragment(
-                                    fragment_type=IdentityType.NAME_ZIP,
+                                    fragment_type=IdentityType.FULL_NAME,
                                     fragment_value=name,
                                     source_system=source,
                                 )

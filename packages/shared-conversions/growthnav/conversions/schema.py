@@ -180,7 +180,50 @@ class Conversion:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Conversion:
-        """Create Conversion from dictionary."""
+        """Create Conversion from dictionary.
+
+        Args:
+            data: Dictionary containing conversion data.
+
+        Returns:
+            Conversion instance.
+
+        Raises:
+            ValueError: If required field 'customer_id' is missing or if
+                value/quantity cannot be converted to numeric types.
+        """
+        # Validate required field
+        if "customer_id" not in data:
+            raise ValueError("Missing required field: customer_id")
+
+        # Validate numeric fields
+        try:
+            value = float(data.get("value", 0))
+        except (ValueError, TypeError) as e:
+            raise ValueError(f"Invalid value: {data.get('value')}") from e
+
+        try:
+            quantity = int(data.get("quantity", 1))
+        except (ValueError, TypeError) as e:
+            raise ValueError(f"Invalid quantity: {data.get('quantity')}") from e
+
+        try:
+            attribution_weight = float(data.get("attribution_weight", 1.0))
+        except (ValueError, TypeError) as e:
+            raise ValueError(f"Invalid attribution_weight: {data.get('attribution_weight')}") from e
+
+        # Parse timestamp
+        timestamp_value = data.get("timestamp")
+        if isinstance(timestamp_value, str):
+            try:
+                timestamp = datetime.fromisoformat(timestamp_value)
+            except ValueError as e:
+                raise ValueError(f"Invalid timestamp format: {timestamp_value}") from e
+        elif isinstance(timestamp_value, datetime):
+            timestamp = timestamp_value
+        else:
+            timestamp = datetime.now(UTC)
+
         return cls(
             customer_id=data["customer_id"],
             user_id=data.get("user_id"),
@@ -190,10 +233,10 @@ class Conversion:
             conversion_id=UUID(data["conversion_id"]) if data.get("conversion_id") else uuid4(),
             conversion_type=ConversionType(data.get("conversion_type", "purchase")),
             source=ConversionSource(data.get("source", "pos")),
-            timestamp=datetime.fromisoformat(data["timestamp"]) if isinstance(data.get("timestamp"), str) else data.get("timestamp", datetime.now(UTC)),
-            value=float(data.get("value", 0)),
+            timestamp=timestamp,
+            value=value,
             currency=data.get("currency", "USD"),
-            quantity=int(data.get("quantity", 1)),
+            quantity=quantity,
             product_id=data.get("product_id"),
             product_name=data.get("product_name"),
             product_category=data.get("product_category"),
@@ -203,7 +246,7 @@ class Conversion:
             attributed_campaign_id=data.get("attributed_campaign_id"),
             attributed_ad_id=data.get("attributed_ad_id"),
             attribution_model=AttributionModel(data["attribution_model"]) if data.get("attribution_model") else None,
-            attribution_weight=float(data.get("attribution_weight", 1.0)),
+            attribution_weight=attribution_weight,
             gclid=data.get("gclid"),
             fbclid=data.get("fbclid"),
             ttclid=data.get("ttclid"),

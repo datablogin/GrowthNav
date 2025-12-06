@@ -8,21 +8,30 @@ This script:
 """
 
 import os
-from datetime import datetime, timedelta
 
 import snowflake.connector
 
 
 def get_connection():
-    """Create Snowflake connection."""
+    """Create Snowflake connection.
+
+    Connection parameters are read from environment variables:
+    - SNOWFLAKE_USER: Snowflake username
+    - SNOWFLAKE_PASSWORD: Snowflake password
+    - SNOWFLAKE_ACCOUNT: Snowflake account identifier
+    - SNOWFLAKE_WAREHOUSE: Warehouse name (default: MARKETING_WH)
+    - SNOWFLAKE_DATABASE: Database name (default: MARKETING_DB)
+    - SNOWFLAKE_SCHEMA: Schema name (default: MART_SALE)
+    - SNOWFLAKE_ROLE: Role name (default: MARKETING_ROLE)
+    """
     return snowflake.connector.connect(
         user=os.getenv("SNOWFLAKE_USER"),
         password=os.getenv("SNOWFLAKE_PASSWORD"),
-        account="NOTHINGBUNDTCAKES-NOTHINGBUNDTCAKES",
-        warehouse="MARKETING_WH",
-        database="MARKETING_DB",
-        schema="MART_SALE",
-        role="MARKETING_ROLE",
+        account=os.getenv("SNOWFLAKE_ACCOUNT", ""),
+        warehouse=os.getenv("SNOWFLAKE_WAREHOUSE", "MARKETING_WH"),
+        database=os.getenv("SNOWFLAKE_DATABASE", "MARKETING_DB"),
+        schema=os.getenv("SNOWFLAKE_SCHEMA", "MART_SALE"),
+        role=os.getenv("SNOWFLAKE_ROLE", "MARKETING_ROLE"),
     )
 
 
@@ -196,7 +205,7 @@ def test_identity_linker():
     print("Testing IdentityLinker with Snowflake data")
     print("=" * 60)
 
-    from growthnav.connectors.identity import IdentityLinker, IdentityType
+    from growthnav.connectors.identity import IdentityLinker
 
     conn = get_connection()
     cursor = conn.cursor()

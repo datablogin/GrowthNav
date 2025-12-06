@@ -26,7 +26,7 @@ class TestIdentityType:
         assert IdentityType.DEVICE_ID == "device_id"
         assert IdentityType.COOKIE_ID == "cookie_id"
         assert IdentityType.CUSTOMER_ID == "customer_id"
-        assert IdentityType.NAME_ZIP == "name_zip"
+        assert IdentityType.FULL_NAME == "full_name"
 
     def test_string_conversion(self) -> None:
         """Test enum values convert to strings correctly."""
@@ -377,6 +377,50 @@ class TestIdentityLinkerDeterministic:
         assert linker._records[0]["last_name"] == "doe"
         assert linker._records[1]["first_name"] == "john"
         assert linker._records[1]["last_name"] == "smith"
+
+    def test_add_records_rejects_invalid_emails(self) -> None:
+        """Test add_records rejects invalid email formats."""
+        linker = IdentityLinker()
+
+        linker.add_records(
+            [
+                {"id": "1", "email": "not_an_email"},  # No @
+                {"id": "2", "email": "@@@"},  # Multiple @ but invalid
+                {"id": "3", "email": "a@b"},  # Too short
+                {"id": "4", "email": "valid@example.com"},  # Valid
+            ],
+            source="test",
+        )
+
+        assert len(linker._records) == 4
+        # Invalid emails should be empty string
+        assert linker._records[0]["email"] == ""
+        assert linker._records[1]["email"] == ""
+        assert linker._records[2]["email"] == ""
+        # Valid email should be preserved
+        assert linker._records[3]["email"] == "valid@example.com"
+
+    def test_add_records_rejects_short_phone_numbers(self) -> None:
+        """Test add_records rejects phone numbers with < 10 digits."""
+        linker = IdentityLinker()
+
+        linker.add_records(
+            [
+                {"id": "1", "phone": "555-1234"},  # Only 7 digits
+                {"id": "2", "phone": "123"},  # Only 3 digits
+                {"id": "3", "phone": ""},  # Empty
+                {"id": "4", "phone": "555-123-4567"},  # Valid 10 digits
+            ],
+            source="test",
+        )
+
+        assert len(linker._records) == 4
+        # Short phone numbers should be empty string
+        assert linker._records[0]["phone"] == ""
+        assert linker._records[1]["phone"] == ""
+        assert linker._records[2]["phone"] == ""
+        # Valid phone should be preserved
+        assert linker._records[3]["phone"] == "5551234567"
 
     def test_resolve_deterministic_links_by_exact_email_match(
         self,

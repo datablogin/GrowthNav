@@ -66,8 +66,8 @@ class IdentityType(str, Enum):
     CUSTOMER_ID = "customer_id"
     """Source system's customer ID - strong within that system"""
 
-    NAME_ZIP = "name_zip"
-    """Name + ZIP code composite - medium strength, useful for matching"""
+    FULL_NAME = "full_name"
+    """Full name (first + last) - medium strength, useful for fuzzy matching"""
 
 
 @dataclass
