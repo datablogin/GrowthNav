@@ -1127,7 +1127,7 @@ snowflake = [
 
 [package.metadata]
 requires-dist = [
-    { name = "anthropic", marker = "extra == 'llm'", specifier = ">=0.40.0" },
+    { name = "anthropic", marker = "extra == 'llm'", specifier = ">=0.75.0" },
     { name = "growthnav-bigquery", editable = "packages/shared-bigquery" },
     { name = "growthnav-connectors", extras = ["snowflake", "salesforce", "hubspot", "identity", "llm"], marker = "extra == 'all'" },
     { name = "growthnav-conversions", editable = "packages/shared-conversions" },
