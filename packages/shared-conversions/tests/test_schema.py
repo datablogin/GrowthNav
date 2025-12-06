@@ -3,6 +3,7 @@
 from datetime import UTC, datetime
 from uuid import UUID
 
+import pytest
 from growthnav.conversions.schema import (
     AttributionModel,
     Conversion,
@@ -438,3 +439,53 @@ class TestConversion:
         data = conversion.to_dict()
 
         assert data["attribution_model"] == "first_click"
+
+    def test_from_dict_missing_customer_id_raises_error(self):
+        """Test that missing customer_id raises ValueError."""
+        data = {
+            "timestamp": "2025-01-15T10:30:00",
+            "value": 100.0,
+        }
+
+        with pytest.raises(ValueError, match="Missing required field: customer_id"):
+            Conversion.from_dict(data)
+
+    def test_from_dict_invalid_value_raises_error(self):
+        """Test that invalid value raises ValueError."""
+        data = {
+            "customer_id": "test",
+            "value": "not_a_number",
+        }
+
+        with pytest.raises(ValueError, match="Invalid value"):
+            Conversion.from_dict(data)
+
+    def test_from_dict_invalid_quantity_raises_error(self):
+        """Test that invalid quantity raises ValueError."""
+        data = {
+            "customer_id": "test",
+            "quantity": "not_an_int",
+        }
+
+        with pytest.raises(ValueError, match="Invalid quantity"):
+            Conversion.from_dict(data)
+
+    def test_from_dict_invalid_timestamp_raises_error(self):
+        """Test that invalid timestamp format raises ValueError."""
+        data = {
+            "customer_id": "test",
+            "timestamp": "not-a-valid-timestamp",
+        }
+
+        with pytest.raises(ValueError, match="Invalid timestamp format"):
+            Conversion.from_dict(data)
+
+    def test_from_dict_invalid_attribution_weight_raises_error(self):
+        """Test that invalid attribution_weight raises ValueError."""
+        data = {
+            "customer_id": "test",
+            "attribution_weight": "not_a_float",
+        }
+
+        with pytest.raises(ValueError, match="Invalid attribution_weight"):
+            Conversion.from_dict(data)
