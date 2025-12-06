@@ -1136,7 +1136,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "python-dateutil", specifier = ">=2.8.0" },
     { name = "simple-salesforce", marker = "extra == 'salesforce'", specifier = ">=1.12.0" },
-    { name = "snowflake-connector-python", marker = "extra == 'snowflake'", specifier = ">=3.0.0" },
+    { name = "snowflake-connector-python", marker = "extra == 'snowflake'", specifier = ">=4.1.1" },
     { name = "splink", marker = "extra == 'identity'", specifier = ">=4.0.0" },
     { name = "tenacity", specifier = ">=8.0.0" },
 ]

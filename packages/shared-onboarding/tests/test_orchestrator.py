@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from growthnav.bigquery import Customer, CustomerRegistry, Industry
 from growthnav.onboarding import (
+    DataSourceConfig,
     OnboardingOrchestrator,
     OnboardingRequest,
     OnboardingResult,
@@ -32,6 +33,7 @@ class TestOnboardingRequest:
         assert request.meta_ad_account_ids == []
         assert request.tags == []
         assert request.credentials == {}
+        assert request.data_sources == []
 
     def test_full_request(self):
         """Test creating request with all fields."""
@@ -100,6 +102,7 @@ class TestOnboardingStatus:
         assert OnboardingStatus.PROVISIONING.value == "provisioning"
         assert OnboardingStatus.REGISTERING.value == "registering"
         assert OnboardingStatus.STORING_CREDENTIALS.value == "storing_credentials"
+        assert OnboardingStatus.CONFIGURING_DATA_SOURCES.value == "configuring_data_sources"
         assert OnboardingStatus.COMPLETED.value == "completed"
         assert OnboardingStatus.FAILED.value == "failed"
 
@@ -732,3 +735,339 @@ class TestOnboardingOrchestratorLazyInit:
 
             # Now it should be created
             mock.assert_called_once()
+
+
+class TestDataSourceConfig:
+    """Test DataSourceConfig dataclass."""
+
+    def test_minimal_config(self):
+        """Test creating config with minimal fields."""
+        config = DataSourceConfig(
+            connector_type="snowflake",
+            name="My Snowflake",
+        )
+
+        assert config.connector_type == "snowflake"
+        assert config.name == "My Snowflake"
+        assert config.connection_params == {}
+        assert config.credentials_secret_path is None
+        assert config.field_overrides == {}
+        assert config.sync_schedule == "daily"
+
+    def test_full_config(self):
+        """Test creating config with all fields."""
+        config = DataSourceConfig(
+            connector_type="snowflake",
+            name="Toast POS via Snowflake",
+            connection_params={
+                "account": "acme.snowflakecomputing.com",
+                "warehouse": "ANALYTICS_WH",
+                "database": "TOAST_DATA",
+                "schema": "RAW",
+            },
+            credentials_secret_path="growthnav-acme-connector-snowflake",
+            field_overrides={
+                "SALE_ID": "transaction_id",
+                "SALE_AMOUNT": "value",
+            },
+            sync_schedule="hourly",
+        )
+
+        assert config.connector_type == "snowflake"
+        assert config.name == "Toast POS via Snowflake"
+        assert config.connection_params["account"] == "acme.snowflakecomputing.com"
+        assert config.credentials_secret_path == "growthnav-acme-connector-snowflake"
+        assert len(config.field_overrides) == 2
+        assert config.sync_schedule == "hourly"
+
+
+class TestOnboardingOrchestratorDataSources:
+    """Test data source configuration during onboarding."""
+
+    @pytest.fixture
+    def mock_provisioner(self):
+        """Create mock provisioner."""
+        provisioner = MagicMock()
+        provisioner.create_dataset.return_value = "test-project.growthnav_test_customer"
+        return provisioner
+
+    @pytest.fixture
+    def mock_registry(self):
+        """Create mock registry."""
+        registry = MagicMock(spec=CustomerRegistry)
+        registry.get_customer.return_value = None  # Customer doesn't exist
+        return registry
+
+    @pytest.fixture
+    def mock_connector_storage(self):
+        """Create mock connector storage."""
+        storage = MagicMock()
+        storage.save.return_value = "connector-uuid-123"
+        return storage
+
+    def test_onboard_with_data_sources(
+        self, mock_provisioner, mock_registry, mock_connector_storage
+    ):
+        """Test onboarding with data sources configured."""
+        request = OnboardingRequest(
+            customer_id="test",
+            customer_name="Test",
+            industry=Industry.GOLF,
+            gcp_project_id="test-project",
+            data_sources=[
+                DataSourceConfig(
+                    connector_type="snowflake",
+                    name="Toast POS",
+                    connection_params={"account": "test.snowflakecomputing.com"},
+                ),
+            ],
+        )
+
+        orchestrator = OnboardingOrchestrator(
+            registry=mock_registry,
+            provisioner=mock_provisioner,
+            connector_storage=mock_connector_storage,
+        )
+
+        result = orchestrator.onboard(request)
+
+        assert result.is_success
+        mock_connector_storage.save.assert_called_once()
+
+    def test_onboard_with_multiple_data_sources(
+        self, mock_provisioner, mock_registry, mock_connector_storage
+    ):
+        """Test onboarding with multiple data sources."""
+        request = OnboardingRequest(
+            customer_id="test",
+            customer_name="Test",
+            industry=Industry.GOLF,
+            gcp_project_id="test-project",
+            data_sources=[
+                DataSourceConfig(
+                    connector_type="snowflake",
+                    name="Toast POS",
+                    connection_params={"account": "test.snowflakecomputing.com"},
+                ),
+                DataSourceConfig(
+                    connector_type="salesforce",
+                    name="Salesforce CRM",
+                    connection_params={"domain": "login"},
+                ),
+            ],
+        )
+
+        orchestrator = OnboardingOrchestrator(
+            registry=mock_registry,
+            provisioner=mock_provisioner,
+            connector_storage=mock_connector_storage,
+        )
+
+        result = orchestrator.onboard(request)
+
+        assert result.is_success
+        assert mock_connector_storage.save.call_count == 2
+
+    def test_onboard_data_sources_without_storage_logs_warning(
+        self, mock_provisioner, mock_registry
+    ):
+        """Test onboarding logs warning when data sources provided but no storage configured."""
+        request = OnboardingRequest(
+            customer_id="test",
+            customer_name="Test",
+            industry=Industry.GOLF,
+            gcp_project_id="test-project",
+            data_sources=[
+                DataSourceConfig(
+                    connector_type="snowflake",
+                    name="Toast POS",
+                ),
+            ],
+        )
+
+        # No connector_storage configured
+        orchestrator = OnboardingOrchestrator(
+            registry=mock_registry,
+            provisioner=mock_provisioner,
+            connector_storage=None,
+        )
+
+        result = orchestrator.onboard(request)
+
+        # Should still succeed, but data sources were skipped
+        assert result.is_success
+
+    def test_onboard_handles_data_source_exception(
+        self, mock_provisioner, mock_registry, mock_connector_storage
+    ):
+        """Test onboarding handles data source configuration exceptions."""
+        mock_connector_storage.save.side_effect = Exception("Storage error")
+
+        request = OnboardingRequest(
+            customer_id="test",
+            customer_name="Test",
+            industry=Industry.GOLF,
+            gcp_project_id="test-project",
+            data_sources=[
+                DataSourceConfig(
+                    connector_type="snowflake",
+                    name="Toast POS",
+                ),
+            ],
+        )
+
+        orchestrator = OnboardingOrchestrator(
+            registry=mock_registry,
+            provisioner=mock_provisioner,
+            connector_storage=mock_connector_storage,
+        )
+
+        result = orchestrator.onboard(request)
+
+        assert result.status == OnboardingStatus.FAILED
+        assert any("Failed to configure data sources" in error for error in result.errors)
+
+    def test_onboard_skips_invalid_connector_type(
+        self, mock_provisioner, mock_registry, mock_connector_storage
+    ):
+        """Test onboarding skips data sources with unknown connector types."""
+        request = OnboardingRequest(
+            customer_id="test",
+            customer_name="Test",
+            industry=Industry.GOLF,
+            gcp_project_id="test-project",
+            data_sources=[
+                DataSourceConfig(
+                    connector_type="unknown_connector",
+                    name="Unknown",
+                ),
+                DataSourceConfig(
+                    connector_type="snowflake",
+                    name="Valid Snowflake",
+                ),
+            ],
+        )
+
+        orchestrator = OnboardingOrchestrator(
+            registry=mock_registry,
+            provisioner=mock_provisioner,
+            connector_storage=mock_connector_storage,
+        )
+
+        result = orchestrator.onboard(request)
+
+        assert result.is_success
+        # Only the valid snowflake connector should be saved
+        mock_connector_storage.save.assert_called_once()
+
+    def test_onboard_data_sources_rollback_on_failure(
+        self, mock_provisioner, mock_registry, mock_connector_storage
+    ):
+        """Test that registry entry is marked inactive when data source config fails."""
+        mock_connector_storage.save.side_effect = Exception("Storage error")
+
+        request = OnboardingRequest(
+            customer_id="test",
+            customer_name="Test",
+            industry=Industry.GOLF,
+            gcp_project_id="test-project",
+            data_sources=[
+                DataSourceConfig(
+                    connector_type="snowflake",
+                    name="Toast POS",
+                ),
+            ],
+        )
+
+        orchestrator = OnboardingOrchestrator(
+            registry=mock_registry,
+            provisioner=mock_provisioner,
+            connector_storage=mock_connector_storage,
+        )
+
+        result = orchestrator.onboard(request)
+
+        assert result.status == OnboardingStatus.FAILED
+        # Registry should be updated to mark customer as inactive
+        mock_registry.update_customer.assert_called()
+
+    def test_onboard_data_sources_rollback_failure_adds_error(
+        self, mock_provisioner, mock_registry, mock_connector_storage
+    ):
+        """Test that rollback failure is added to errors when both data source and rollback fail."""
+        mock_connector_storage.save.side_effect = Exception("Storage error")
+        mock_registry.update_customer.side_effect = Exception("Registry update failed")
+
+        request = OnboardingRequest(
+            customer_id="test",
+            customer_name="Test",
+            industry=Industry.GOLF,
+            gcp_project_id="test-project",
+            data_sources=[
+                DataSourceConfig(
+                    connector_type="snowflake",
+                    name="Toast POS",
+                ),
+            ],
+        )
+
+        orchestrator = OnboardingOrchestrator(
+            registry=mock_registry,
+            provisioner=mock_provisioner,
+            connector_storage=mock_connector_storage,
+        )
+
+        result = orchestrator.onboard(request)
+
+        assert result.status == OnboardingStatus.FAILED
+        # Should have both the original error and the rollback failure error
+        assert len(result.errors) == 2
+        assert any("Storage error" in e for e in result.errors)
+        assert any("Registry rollback failed" in e for e in result.errors)
+
+    def test_onboard_warns_on_invalid_sync_schedule(
+        self, mock_provisioner, mock_registry, mock_connector_storage, caplog
+    ):
+        """Test that invalid sync_schedule logs a warning and defaults to daily."""
+        import logging
+
+        request = OnboardingRequest(
+            customer_id="test",
+            customer_name="Test",
+            industry=Industry.GOLF,
+            gcp_project_id="test-project",
+            data_sources=[
+                DataSourceConfig(
+                    connector_type="snowflake",
+                    name="Toast POS",
+                    sync_schedule="invalid_schedule",  # Invalid value
+                ),
+            ],
+        )
+
+        orchestrator = OnboardingOrchestrator(
+            registry=mock_registry,
+            provisioner=mock_provisioner,
+            connector_storage=mock_connector_storage,
+        )
+
+        with caplog.at_level(logging.WARNING):
+            result = orchestrator.onboard(request)
+
+        assert result.is_success
+        # Check warning was logged
+        assert any("Unknown sync schedule 'invalid_schedule'" in record.message for record in caplog.records)
+        assert any("defaulting to 'daily'" in record.message for record in caplog.records)
+
+    def test_connector_storage_property(self):
+        """Test connector_storage property returns configured storage."""
+        mock_storage = MagicMock()
+        orchestrator = OnboardingOrchestrator(connector_storage=mock_storage)
+
+        assert orchestrator.connector_storage is mock_storage
+
+    def test_connector_storage_property_none(self):
+        """Test connector_storage property returns None when not configured."""
+        orchestrator = OnboardingOrchestrator()
+
+        assert orchestrator.connector_storage is None

@@ -11,7 +11,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from growthnav.bigquery import Customer, CustomerRegistry, Industry
 
@@ -31,8 +31,39 @@ class OnboardingStatus(str, Enum):
     PROVISIONING = "provisioning"
     REGISTERING = "registering"
     STORING_CREDENTIALS = "storing_credentials"
+    CONFIGURING_DATA_SOURCES = "configuring_data_sources"
     COMPLETED = "completed"
     FAILED = "failed"
+
+
+@dataclass
+class DataSourceConfig:
+    """Configuration for a customer data source.
+
+    Used during onboarding to configure connectors to external data systems
+    (Snowflake, Salesforce, HubSpot, etc.).
+
+    Example:
+        >>> config = DataSourceConfig(
+        ...     connector_type="snowflake",
+        ...     name="Toast POS via Snowflake",
+        ...     connection_params={
+        ...         "account": "acme.snowflakecomputing.com",
+        ...         "warehouse": "ANALYTICS_WH",
+        ...         "database": "TOAST_DATA",
+        ...         "schema": "RAW",
+        ...         "table": "TRANSACTIONS",
+        ...     },
+        ...     credentials_secret_path="growthnav-acme-connector-snowflake",
+        ... )
+    """
+
+    connector_type: str  # "snowflake", "salesforce", "hubspot", etc.
+    name: str
+    connection_params: dict[str, Any] = field(default_factory=dict)
+    credentials_secret_path: str | None = None  # Path to Secret Manager secret
+    field_overrides: dict[str, str] = field(default_factory=dict)
+    sync_schedule: str = "daily"  # "hourly", "daily", "weekly", "manual"
 
 
 @dataclass
@@ -47,6 +78,7 @@ class OnboardingRequest:
     meta_ad_account_ids: list[str] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
     credentials: dict[str, str] = field(default_factory=dict)
+    data_sources: list[DataSourceConfig] = field(default_factory=list)
 
 
 @dataclass
@@ -81,6 +113,7 @@ class OnboardingOrchestrator:
     2. Creating a BigQuery dataset for the customer
     3. Registering the customer in the registry
     4. Storing any credentials in Secret Manager
+    5. Configuring data source connectors (if provided)
 
     Example:
         >>> orchestrator = OnboardingOrchestrator()
@@ -88,6 +121,13 @@ class OnboardingOrchestrator:
         ...     customer_id="acme_corp",
         ...     customer_name="Acme Corporation",
         ...     industry=Industry.ECOMMERCE,
+        ...     data_sources=[
+        ...         DataSourceConfig(
+        ...             connector_type="snowflake",
+        ...             name="Toast POS",
+        ...             connection_params={"account": "acme.snowflakecomputing.com"},
+        ...         )
+        ...     ],
         ... )
         >>> result = orchestrator.onboard(request)
         >>> if result.is_success:
@@ -99,6 +139,7 @@ class OnboardingOrchestrator:
         registry: CustomerRegistry | None = None,
         provisioner: DatasetProvisioner | None = None,
         credential_store: CredentialStore | None = None,
+        connector_storage: Any | None = None,
         default_project_id: str | None = None,
     ):
         """Initialize the orchestrator.
@@ -107,11 +148,13 @@ class OnboardingOrchestrator:
             registry: Customer registry for storing customer records.
             provisioner: Dataset provisioner for creating BigQuery datasets.
             credential_store: Credential store for storing secrets.
+            connector_storage: Storage for connector configurations.
             default_project_id: Default GCP project ID if not specified in request.
         """
         self._registry = registry
         self._provisioner = provisioner
         self._credential_store = credential_store
+        self._connector_storage = connector_storage
         self.default_project_id = default_project_id
 
     @property
@@ -134,6 +177,11 @@ class OnboardingOrchestrator:
     def credential_store(self) -> CredentialStore | None:
         """Return credential store (may be None if not configured)."""
         return self._credential_store
+
+    @property
+    def connector_storage(self) -> Any | None:
+        """Return connector storage (may be None if not configured)."""
+        return self._connector_storage
 
     def validate_request(self, request: OnboardingRequest) -> list[str]:
         """Validate an onboarding request.
@@ -294,6 +342,52 @@ class OnboardingOrchestrator:
                                 )
                         return result
 
+            # Step 6: Configure data sources (if provided)
+            if request.data_sources:
+                if not self.connector_storage:
+                    logger.warning(
+                        f"Skipping {len(request.data_sources)} data sources for {request.customer_id}: "
+                        "connector storage not configured"
+                    )
+                else:
+                    result.status = OnboardingStatus.CONFIGURING_DATA_SOURCES
+                    try:
+                        configured_connectors = self._configure_data_sources(
+                            request.customer_id,
+                            request.data_sources,
+                        )
+                        logger.info(
+                            f"Configured {len(configured_connectors)} data sources for {request.customer_id}"
+                        )
+                    except Exception as ds_error:
+                        result.status = OnboardingStatus.FAILED
+                        result.errors.append(f"Failed to configure data sources: {ds_error}")
+                        result.completed_at = datetime.now(UTC)
+                        logger.exception(
+                            "Data source configuration failed",
+                            extra={"customer_id": request.customer_id}
+                        )
+                        # Rollback: Mark customer as inactive
+                        if result.customer and self._registry:
+                            try:
+                                from growthnav.bigquery import CustomerStatus
+
+                                logger.warning(
+                                    f"Rolling back registry entry for {request.customer_id} "
+                                    "due to data source configuration failure"
+                                )
+                                self._registry.update_customer(
+                                    request.customer_id, {"status": CustomerStatus.INACTIVE.value}
+                                )
+                            except Exception as reg_rollback_error:
+                                rollback_msg = f"Registry rollback failed: {reg_rollback_error}"
+                                logger.error(
+                                    f"{rollback_msg} for {request.customer_id}. "
+                                    f"Manual cleanup may be required."
+                                )
+                                result.errors.append(rollback_msg)
+                        return result
+
             # Success
             result.status = OnboardingStatus.COMPLETED
             result.completed_at = datetime.now(UTC)
@@ -350,6 +444,76 @@ class OnboardingOrchestrator:
                     )
 
             return result
+
+    def _configure_data_sources(
+        self,
+        customer_id: str,
+        data_sources: list[DataSourceConfig],
+    ) -> list[str]:
+        """Configure data source connectors for a customer.
+
+        Args:
+            customer_id: The customer ID.
+            data_sources: List of data source configurations.
+
+        Returns:
+            List of connector IDs that were configured.
+
+        Raises:
+            Exception: If connector storage fails.
+        """
+        from growthnav.connectors import (
+            ConnectorConfig,
+            ConnectorType,
+            SyncMode,
+            SyncSchedule,
+        )
+
+        connector_ids = []
+
+        for ds_config in data_sources:
+            # Convert DataSourceConfig to ConnectorConfig
+            try:
+                connector_type = ConnectorType(ds_config.connector_type)
+            except ValueError:
+                logger.warning(
+                    f"Unknown connector type '{ds_config.connector_type}' for {customer_id}, skipping"
+                )
+                continue
+
+            # Map sync schedule string to enum
+            sync_schedule_map = {
+                "hourly": SyncSchedule.HOURLY,
+                "daily": SyncSchedule.DAILY,
+                "weekly": SyncSchedule.WEEKLY,
+                "manual": SyncSchedule.MANUAL,
+            }
+            sync_schedule = sync_schedule_map.get(ds_config.sync_schedule)
+            if sync_schedule is None:
+                logger.warning(
+                    f"Unknown sync schedule '{ds_config.sync_schedule}' for {customer_id}, "
+                    f"defaulting to 'daily'"
+                )
+                sync_schedule = SyncSchedule.DAILY
+
+            connector_config = ConnectorConfig(
+                connector_type=connector_type,
+                customer_id=customer_id,
+                name=ds_config.name,
+                connection_params=ds_config.connection_params,
+                credentials_secret_path=ds_config.credentials_secret_path,
+                field_overrides=ds_config.field_overrides,
+                sync_mode=SyncMode.INCREMENTAL,
+                sync_schedule=sync_schedule,
+            )
+
+            # Save to storage (connector_storage is guaranteed non-None by caller)
+            assert self.connector_storage is not None
+            connector_id = self.connector_storage.save(connector_config)
+            connector_ids.append(connector_id)
+            logger.debug(f"Configured connector {connector_id} for {customer_id}")
+
+        return connector_ids
 
     def offboard(self, customer_id: str, delete_data: bool = False) -> bool:
         """Offboard a customer (mark as inactive).

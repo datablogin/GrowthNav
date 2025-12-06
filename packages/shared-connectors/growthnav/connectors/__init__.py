@@ -45,6 +45,7 @@ from growthnav.connectors.exceptions import (
     SyncError,
 )
 from growthnav.connectors.registry import ConnectorRegistry, get_registry
+from growthnav.connectors.storage import ConnectorStorage
 
 __all__ = [
     # Base
@@ -64,4 +65,6 @@ __all__ = [
     # Registry
     "ConnectorRegistry",
     "get_registry",
+    # Storage
+    "ConnectorStorage",
 ]
