@@ -6,7 +6,6 @@ import sys
 from typing import Any
 
 import pytest
-
 from growthnav.connectors.identity import (
     IdentityFragment,
     IdentityLinker,

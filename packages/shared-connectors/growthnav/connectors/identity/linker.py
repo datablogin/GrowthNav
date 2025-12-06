@@ -37,6 +37,12 @@ class IdentityLinker:
     resolve customer identities from different data sources. Supports email,
     phone, name, hashed credit card, and loyalty ID matching.
 
+    Note:
+        This class is NOT thread-safe. Create separate instances for
+        concurrent resolution tasks. All records are stored in memory,
+        so expect approximately 1-2 KB per record. For 1M records,
+        expect 1-2 GB RAM usage during resolution.
+
     Example:
         >>> # Probabilistic matching
         >>> linker = IdentityLinker()
@@ -97,7 +103,7 @@ class IdentityLinker:
             # Extract source ID
             source_id = record.get(id_column, "")
             if not source_id:
-                logger.warning(f"Record missing {id_column}, skipping: {record}")
+                logger.warning(f"Record missing {id_column} from {source}, skipping")
                 continue
 
             # Create normalized record
@@ -130,32 +136,36 @@ class IdentityLinker:
             record: Raw record dictionary.
 
         Returns:
-            Normalized email address or empty string.
+            Normalized email address or empty string if invalid.
         """
         email = record.get("email") or record.get("email_address") or ""
         if isinstance(email, str):
-            return email.lower().strip()
+            email = email.lower().strip()
+            # Basic validation - must contain @ and have reasonable length
+            if "@" in email and len(email) > 3:
+                return email
         return ""
 
     def _normalize_phone(self, record: dict) -> str:
         """Normalize phone number to last 10 digits (US format).
 
         Extracts only digits and keeps the last 10 for US phone numbers.
+        Phone numbers with fewer than 10 digits are rejected as invalid.
 
         Args:
             record: Raw record dictionary.
 
         Returns:
-            Normalized 10-digit phone number or empty string.
+            Normalized 10-digit phone number or empty string if invalid.
         """
         phone = record.get("phone") or record.get("phone_number") or ""
         if isinstance(phone, str):
             # Extract digits only
             digits = re.sub(r"\D", "", phone)
-            # Keep last 10 digits (US format)
+            # Only return if we have at least 10 digits (US format)
             if len(digits) >= 10:
                 return digits[-10:]
-            return digits
+            # Reject short phone numbers as invalid
         return ""
 
     def _normalize_name(self, name: str | None) -> str:
@@ -322,20 +332,19 @@ class IdentityLinker:
             # Generate global ID for this identity
             global_id = str(uuid.uuid4())
 
-            # Collect all identity fragments
+            # Collect all identity fragments - deduplicate by type+value only
             fragments: list[IdentityFragment] = []
-            seen_combinations = set()
+            seen_values: set[tuple[IdentityType, str]] = set()
 
             for record in records:
                 # Create fragments for each identity type
                 source = record.get("source_system", "")
-                source_id = record.get("source_id", "")
 
                 # Email fragment
                 email = record.get("email", "")
                 if email:
-                    key = (IdentityType.EMAIL, email, source, source_id)
-                    if key not in seen_combinations:
+                    key = (IdentityType.EMAIL, email)
+                    if key not in seen_values:
                         fragments.append(
                             IdentityFragment(
                                 fragment_type=IdentityType.EMAIL,
@@ -343,13 +352,13 @@ class IdentityLinker:
                                 source_system=source,
                             )
                         )
-                        seen_combinations.add(key)
+                        seen_values.add(key)
 
                 # Phone fragment
                 phone = record.get("phone", "")
                 if phone:
-                    key = (IdentityType.PHONE, phone, source, source_id)
-                    if key not in seen_combinations:
+                    key = (IdentityType.PHONE, phone)
+                    if key not in seen_values:
                         fragments.append(
                             IdentityFragment(
                                 fragment_type=IdentityType.PHONE,
@@ -357,59 +366,66 @@ class IdentityLinker:
                                 source_system=source,
                             )
                         )
-                        seen_combinations.add(key)
+                        seen_values.add(key)
 
                 # Name fragment (combine first and last)
                 first_name = record.get("first_name", "")
                 last_name = record.get("last_name", "")
                 if first_name or last_name:
                     name = f"{first_name} {last_name}".strip()
-                    key = (IdentityType.NAME_ZIP, name, source, source_id)
-                    if key not in seen_combinations:
-                        fragments.append(
-                            IdentityFragment(
-                                fragment_type=IdentityType.NAME_ZIP,
-                                fragment_value=name,
-                                source_system=source,
+                    if name:  # Only add if not empty after strip
+                        key = (IdentityType.NAME_ZIP, name)
+                        if key not in seen_values:
+                            fragments.append(
+                                IdentityFragment(
+                                    fragment_type=IdentityType.NAME_ZIP,
+                                    fragment_value=name,
+                                    source_system=source,
+                                )
                             )
-                        )
-                        seen_combinations.add(key)
+                            seen_values.add(key)
 
                 # Hashed CC fragment
                 hashed_cc = record.get("hashed_cc", "")
                 if hashed_cc:
-                    key = (IdentityType.HASHED_CC, hashed_cc, source, source_id)
-                    if key not in seen_combinations:
+                    key = (IdentityType.HASHED_CC, str(hashed_cc))
+                    if key not in seen_values:
                         fragments.append(
                             IdentityFragment(
                                 fragment_type=IdentityType.HASHED_CC,
-                                fragment_value=hashed_cc,
+                                fragment_value=str(hashed_cc),
                                 source_system=source,
                             )
                         )
-                        seen_combinations.add(key)
+                        seen_values.add(key)
 
                 # Loyalty ID fragment
                 loyalty_id = record.get("loyalty_id", "")
                 if loyalty_id:
-                    key = (IdentityType.LOYALTY_ID, loyalty_id, source, source_id)
-                    if key not in seen_combinations:
+                    key = (IdentityType.LOYALTY_ID, str(loyalty_id))
+                    if key not in seen_values:
                         fragments.append(
                             IdentityFragment(
                                 fragment_type=IdentityType.LOYALTY_ID,
-                                fragment_value=loyalty_id,
+                                fragment_value=str(loyalty_id),
                                 source_system=source,
                             )
                         )
-                        seen_combinations.add(key)
+                        seen_values.add(key)
 
             # Create resolved identity
-            # Note: match_probability in Splink clusters represents the overall cluster quality
-            # For simplicity, we'll use a high probability since clustering already filtered
+            # Use average of match probabilities from cluster if available
+            match_probs = [
+                float(r.get("match_probability", 0.9))
+                for r in records
+                if r.get("match_probability") is not None
+            ]
+            avg_probability = sum(match_probs) / len(match_probs) if match_probs else 0.9
+
             identity = ResolvedIdentity(
                 global_id=global_id,
                 fragments=fragments,
-                match_probability=0.9,  # High confidence after clustering
+                match_probability=avg_probability,
             )
 
             identities.append(identity)
@@ -509,19 +525,18 @@ class IdentityLinker:
             # Generate global ID
             global_id = str(uuid.uuid4())
 
-            # Collect fragments
+            # Collect fragments - deduplicate by type+value only
             fragments: list[IdentityFragment] = []
-            seen_combinations = set()
+            seen_values: set[tuple[IdentityType, str]] = set()
 
             for idx in record_indices:
                 record = self._records[idx]
                 source = record["source_system"]
-                source_id = record["source_id"]
 
                 # Email fragment
                 if record.get("email"):
-                    key = (IdentityType.EMAIL, record["email"], source, source_id)
-                    if key not in seen_combinations:
+                    key = (IdentityType.EMAIL, record["email"])
+                    if key not in seen_values:
                         fragments.append(
                             IdentityFragment(
                                 fragment_type=IdentityType.EMAIL,
@@ -529,12 +544,12 @@ class IdentityLinker:
                                 source_system=source,
                             )
                         )
-                        seen_combinations.add(key)
+                        seen_values.add(key)
 
                 # Phone fragment
                 if record.get("phone"):
-                    key = (IdentityType.PHONE, record["phone"], source, source_id)
-                    if key not in seen_combinations:
+                    key = (IdentityType.PHONE, record["phone"])
+                    if key not in seen_values:
                         fragments.append(
                             IdentityFragment(
                                 fragment_type=IdentityType.PHONE,
@@ -542,49 +557,50 @@ class IdentityLinker:
                                 source_system=source,
                             )
                         )
-                        seen_combinations.add(key)
+                        seen_values.add(key)
 
                 # Name fragment
                 first_name = record.get("first_name", "")
                 last_name = record.get("last_name", "")
                 if first_name or last_name:
                     name = f"{first_name} {last_name}".strip()
-                    key = (IdentityType.NAME_ZIP, name, source, source_id)
-                    if key not in seen_combinations:
-                        fragments.append(
-                            IdentityFragment(
-                                fragment_type=IdentityType.NAME_ZIP,
-                                fragment_value=name,
-                                source_system=source,
+                    if name:  # Only add if not empty after strip
+                        key = (IdentityType.NAME_ZIP, name)
+                        if key not in seen_values:
+                            fragments.append(
+                                IdentityFragment(
+                                    fragment_type=IdentityType.NAME_ZIP,
+                                    fragment_value=name,
+                                    source_system=source,
+                                )
                             )
-                        )
-                        seen_combinations.add(key)
+                            seen_values.add(key)
 
                 # Hashed CC fragment
                 if record.get("hashed_cc"):
-                    key = (IdentityType.HASHED_CC, record["hashed_cc"], source, source_id)
-                    if key not in seen_combinations:
+                    key = (IdentityType.HASHED_CC, str(record["hashed_cc"]))
+                    if key not in seen_values:
                         fragments.append(
                             IdentityFragment(
                                 fragment_type=IdentityType.HASHED_CC,
-                                fragment_value=record["hashed_cc"],
+                                fragment_value=str(record["hashed_cc"]),
                                 source_system=source,
                             )
                         )
-                        seen_combinations.add(key)
+                        seen_values.add(key)
 
                 # Loyalty ID fragment
                 if record.get("loyalty_id"):
-                    key = (IdentityType.LOYALTY_ID, record["loyalty_id"], source, source_id)
-                    if key not in seen_combinations:
+                    key = (IdentityType.LOYALTY_ID, str(record["loyalty_id"]))
+                    if key not in seen_values:
                         fragments.append(
                             IdentityFragment(
                                 fragment_type=IdentityType.LOYALTY_ID,
-                                fragment_value=record["loyalty_id"],
+                                fragment_value=str(record["loyalty_id"]),
                                 source_system=source,
                             )
                         )
-                        seen_combinations.add(key)
+                        seen_values.add(key)
 
             # Create resolved identity with exact match probability
             identity = ResolvedIdentity(
