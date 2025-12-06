@@ -132,6 +132,69 @@ class TestColumnProfiler:
         """Create a ColumnProfiler instance."""
         return ColumnProfiler()
 
+    def test_init_default_treat_empty_as_null(self) -> None:
+        """Test __init__ defaults to treat_empty_as_null=True."""
+        profiler = ColumnProfiler()
+        assert profiler._treat_empty_as_null is True
+
+    def test_init_accept_treat_empty_as_null_false(self) -> None:
+        """Test __init__ accepts treat_empty_as_null=False."""
+        profiler = ColumnProfiler(treat_empty_as_null=False)
+        assert profiler._treat_empty_as_null is False
+
+    def test_is_null_returns_true_for_none(self, profiler: ColumnProfiler) -> None:
+        """Test _is_null returns True for None."""
+        assert profiler._is_null(None) is True
+
+    def test_is_null_returns_true_for_empty_string_by_default(
+        self, profiler: ColumnProfiler
+    ) -> None:
+        """Test _is_null returns True for empty string when treat_empty_as_null=True."""
+        assert profiler._is_null("") is True
+
+    def test_is_null_returns_false_for_empty_string_when_disabled(self) -> None:
+        """Test _is_null returns False for empty string when treat_empty_as_null=False."""
+        profiler = ColumnProfiler(treat_empty_as_null=False)
+        assert profiler._is_null("") is False
+
+    def test_is_null_returns_false_for_non_null_values(
+        self, profiler: ColumnProfiler
+    ) -> None:
+        """Test _is_null returns False for actual values."""
+        assert profiler._is_null("value") is False
+        assert profiler._is_null(0) is False
+        assert profiler._is_null(False) is False
+
+    def test_profile_empty_string_counted_as_null_by_default(self) -> None:
+        """Test empty strings count as null when treat_empty_as_null=True (default)."""
+        profiler = ColumnProfiler()
+        data = [
+            {"name": "Alice"},
+            {"name": ""},
+            {"name": "Bob"},
+        ]
+
+        result = profiler.profile(data)
+
+        assert result["name"].total_count == 3
+        assert result["name"].null_count == 1  # Empty string counts as null
+        assert result["name"].unique_count == 2  # Only "Alice" and "Bob"
+
+    def test_profile_empty_string_not_counted_as_null_when_disabled(self) -> None:
+        """Test empty strings don't count as null when treat_empty_as_null=False."""
+        profiler = ColumnProfiler(treat_empty_as_null=False)
+        data = [
+            {"name": "Alice"},
+            {"name": ""},
+            {"name": "Bob"},
+        ]
+
+        result = profiler.profile(data)
+
+        assert result["name"].total_count == 3
+        assert result["name"].null_count == 0  # Empty string is not null
+        assert result["name"].unique_count == 3  # "Alice", "", and "Bob"
+
     def test_profile_empty_data(self, profiler: ColumnProfiler) -> None:
         """Test profile() with empty data returns empty dict."""
         result = profiler.profile([])

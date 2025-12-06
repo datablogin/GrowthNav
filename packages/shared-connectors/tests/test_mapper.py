@@ -102,17 +102,17 @@ class TestLLMSchemaMapper:
             _ = mapper.client
 
     def test_client_property_lazy_initializes(self) -> None:
-        """Test client property creates Anthropic client when not provided."""
+        """Test client property creates AsyncAnthropic client when not provided."""
         mapper = LLMSchemaMapper()
 
-        mock_anthropic_class = MagicMock()
+        mock_async_anthropic_class = MagicMock()
         mock_client = MagicMock()
-        mock_anthropic_class.return_value = mock_client
+        mock_async_anthropic_class.return_value = mock_client
 
-        # The mapper imports Anthropic inside the property, so we patch the import
+        # The mapper imports AsyncAnthropic inside the property, so we patch the import
         with (
             patch.dict(
-                "sys.modules", {"anthropic": MagicMock(Anthropic=mock_anthropic_class)}
+                "sys.modules", {"anthropic": MagicMock(AsyncAnthropic=mock_async_anthropic_class)}
             ),
             patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}),
         ):
@@ -126,7 +126,7 @@ class TestLLMSchemaMapper:
         mapper = LLMSchemaMapper()
 
         mock_anthropic_module = MagicMock()
-        mock_anthropic_module.Anthropic = MagicMock()
+        mock_anthropic_module.AsyncAnthropic = MagicMock()
 
         with (
             patch.dict("sys.modules", {"anthropic": mock_anthropic_module}),
@@ -434,7 +434,7 @@ class TestLLMSchemaMapper:
 
     @pytest.mark.asyncio
     async def test_suggest_mappings_calls_client(self) -> None:
-        """Test suggest_mappings calls Anthropic client correctly."""
+        """Test suggest_mappings calls AsyncAnthropic client correctly."""
         mock_client = MagicMock()
         mock_response = MagicMock()
         mock_response.content = [
@@ -449,7 +449,8 @@ class TestLLMSchemaMapper:
             ]"""
             )
         ]
-        mock_client.messages.create = MagicMock(return_value=mock_response)
+        # Use AsyncMock for the async messages.create method
+        mock_client.messages.create = AsyncMock(return_value=mock_response)
 
         mapper = LLMSchemaMapper(anthropic_client=mock_client)
         profiles = {

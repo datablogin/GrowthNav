@@ -69,6 +69,10 @@ class ColumnProfiler:
         profiles = profiler.profile(data)
         print(profiles["email"].detected_patterns)  # ["email"]
         print(profiles["age"].inferred_type)  # "number"
+
+    Note:
+        By default, empty strings are treated as null values. This can be
+        changed by setting treat_empty_as_null=False in the constructor.
     """
 
     # Regex patterns for common data formats (compiled for performance)
@@ -86,6 +90,28 @@ class ColumnProfiler:
         "gclid": re.compile(r"^[A-Za-z0-9_-]{20,}$"),
         "url": re.compile(r"^https?://[^\s/$.?#].[^\s]*$"),
     }
+
+    def __init__(self, treat_empty_as_null: bool = True) -> None:
+        """Initialize the column profiler.
+
+        Args:
+            treat_empty_as_null: If True (default), empty strings are counted as null
+                values. Set to False to treat empty strings as valid values.
+        """
+        self._treat_empty_as_null = treat_empty_as_null
+
+    def _is_null(self, value: Any) -> bool:
+        """Check if a value should be treated as null.
+
+        Args:
+            value: Value to check.
+
+        Returns:
+            True if value is null (None, or empty string when treat_empty_as_null=True).
+        """
+        if value is None:
+            return True
+        return bool(self._treat_empty_as_null and value == "")
 
     def profile(
         self, data: list[dict], sample_size: int = 10
@@ -129,8 +155,8 @@ class ColumnProfiler:
             ColumnProfile for the column
         """
         total_count = len(values)
-        null_count = sum(1 for v in values if v is None or v == "")
-        non_null_values = [v for v in values if v is not None and v != ""]
+        null_count = sum(1 for v in values if self._is_null(v))
+        non_null_values = [v for v in values if not self._is_null(v)]
         unique_count = len(set(str(v) for v in non_null_values))
 
         # Infer type from first 100 non-null values for performance

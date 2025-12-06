@@ -98,10 +98,10 @@ class LLMSchemaMapper:
 
     @property
     def client(self) -> Any:
-        """Lazy-initialize and return the Anthropic client.
+        """Lazy-initialize and return the async Anthropic client.
 
         Returns:
-            Configured Anthropic client instance.
+            Configured AsyncAnthropic client instance.
 
         Raises:
             ImportError: If anthropic package is not installed.
@@ -109,7 +109,7 @@ class LLMSchemaMapper:
         """
         if self._client is None:
             try:
-                from anthropic import Anthropic
+                from anthropic import AsyncAnthropic
 
                 api_key = os.getenv("ANTHROPIC_API_KEY")
                 if not api_key:
@@ -117,8 +117,8 @@ class LLMSchemaMapper:
                         "ANTHROPIC_API_KEY environment variable not set. "
                         "Required for LLM schema mapping."
                     )
-                self._client = Anthropic(api_key=api_key)
-                logger.debug("Initialized Anthropic client for schema mapping")
+                self._client = AsyncAnthropic(api_key=api_key)
+                logger.debug("Initialized AsyncAnthropic client for schema mapping")
             except ImportError as e:
                 raise ImportError(
                     "Anthropic client required for LLM schema mapping. "
@@ -152,8 +152,8 @@ class LLMSchemaMapper:
         # Build the prompt with schema information
         prompt = self._build_prompt(source_profiles, sample_rows, context)
 
-        # Call Claude
-        response = self.client.messages.create(
+        # Call Claude asynchronously
+        response = await self.client.messages.create(
             model=self._model,
             max_tokens=4096,
             messages=[{"role": "user", "content": prompt}],
