@@ -18,8 +18,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
+
+if TYPE_CHECKING:
+    from growthnav.connectors.identity import IdentityFragment
 
 
 class ConversionSource(str, Enum):
@@ -87,6 +90,10 @@ class Conversion:
     customer_id: str  # GrowthNav customer (e.g., "topgolf")
     user_id: str | None = None  # End user/buyer identifier
 
+    # Identity resolution (populated after linking)
+    identity_fragments: list[IdentityFragment] = field(default_factory=list)
+    global_customer_id: str | None = None  # Resolved cross-system ID
+
     # Transaction identification
     transaction_id: str | None = None  # Source system transaction ID
     conversion_id: UUID = field(default_factory=uuid4)  # GrowthNav internal ID
@@ -134,6 +141,16 @@ class Conversion:
         return {
             "customer_id": self.customer_id,
             "user_id": self.user_id,
+            "identity_fragments": [
+                {
+                    "fragment_type": frag.fragment_type.value,
+                    "fragment_value": frag.fragment_value,
+                    "source_system": frag.source_system,
+                    "confidence": frag.confidence,
+                }
+                for frag in self.identity_fragments
+            ],
+            "global_customer_id": self.global_customer_id,
             "transaction_id": self.transaction_id,
             "conversion_id": str(self.conversion_id),
             "conversion_type": self.conversion_type.value,
@@ -167,6 +184,8 @@ class Conversion:
         return cls(
             customer_id=data["customer_id"],
             user_id=data.get("user_id"),
+            identity_fragments=[],  # Will be populated by identity linker
+            global_customer_id=data.get("global_customer_id"),
             transaction_id=data.get("transaction_id"),
             conversion_id=UUID(data["conversion_id"]) if data.get("conversion_id") else uuid4(),
             conversion_type=ConversionType(data.get("conversion_type", "purchase")),
