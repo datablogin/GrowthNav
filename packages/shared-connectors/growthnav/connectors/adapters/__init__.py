@@ -50,9 +50,12 @@ except ImportError:  # pragma: no cover
     # hubspot-api-client not installed
     pass
 
-# Zoho and OLO connectors use httpx which is a core dependency
-from growthnav.connectors.adapters.olo import OLOConnector as OLOConnector
+# Zoho connector uses httpx which is a core dependency
 from growthnav.connectors.adapters.zoho import ZohoConnector as ZohoConnector
 
 __all__.append("ZohoConnector")
+
+# OLO connector uses httpx which is a core dependency
+from growthnav.connectors.adapters.olo import OLOConnector as OLOConnector  # noqa: E402
+
 __all__.append("OLOConnector")
