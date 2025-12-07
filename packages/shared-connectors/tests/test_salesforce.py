@@ -6,7 +6,6 @@ from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from growthnav.connectors.config import ConnectorConfig, ConnectorType, SyncMode
 
 
@@ -215,17 +214,15 @@ class TestSalesforceConnector:
             query = call_args[0][0]
             assert "LIMIT 50" in query
 
-    def test_fetch_records_with_custom_query(
+    def test_fetch_records_with_invalid_object_type(
         self, salesforce_config: ConnectorConfig
     ) -> None:
-        """Test record fetching with custom SOQL query."""
-        salesforce_config.connection_params["query"] = (
-            "SELECT Id, Name FROM Account WHERE Type = 'Customer'"
+        """Test record fetching rejects invalid object types."""
+        salesforce_config.connection_params["object_type"] = (
+            "Opportunity; DROP TABLE users;--"
         )
 
         mock_sf_client = MagicMock()
-        mock_sf_client.query.return_value = {"records": [], "done": True}
-
         mock_sf_module = MagicMock()
         mock_sf_module.Salesforce.return_value = mock_sf_client
 
@@ -235,11 +232,8 @@ class TestSalesforceConnector:
             connector = SalesforceConnector(salesforce_config)
             connector.authenticate()
 
-            list(connector.fetch_records())
-
-            call_args = mock_sf_client.query.call_args
-            query = call_args[0][0]
-            assert query == "SELECT Id, Name FROM Account WHERE Type = 'Customer'"
+            with pytest.raises(ValueError, match="Invalid Salesforce object type"):
+                list(connector.fetch_records())
 
     def test_get_fields_for_opportunity(
         self, salesforce_config: ConnectorConfig

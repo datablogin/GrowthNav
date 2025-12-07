@@ -9,11 +9,15 @@ from typing import Any
 
 from growthnav.connectors.base import BaseConnector
 from growthnav.connectors.config import ConnectorConfig, ConnectorType
+from growthnav.connectors.exceptions import AuthenticationError, SchemaError
 from growthnav.connectors.registry import get_registry
 from growthnav.conversions import Conversion, CRMNormalizer
 from growthnav.conversions.schema import ConversionType
 
 logger = logging.getLogger(__name__)
+
+# Valid HubSpot object types
+VALID_OBJECT_TYPES = {"deals", "contacts", "companies"}
 
 
 class HubSpotConnector(BaseConnector):
@@ -49,7 +53,12 @@ class HubSpotConnector(BaseConnector):
         super().__init__(config)
 
     def authenticate(self) -> None:
-        """Connect to HubSpot."""
+        """Connect to HubSpot.
+
+        Raises:
+            ImportError: If hubspot-api-client is not installed.
+            AuthenticationError: If authentication fails.
+        """
         try:
             from hubspot import HubSpot
         except ImportError as e:
@@ -59,9 +68,15 @@ class HubSpotConnector(BaseConnector):
             ) from e
 
         creds = self.config.credentials
-        self._client = HubSpot(access_token=creds["access_token"])
-        self._authenticated = True
-        logger.info("Connected to HubSpot")
+
+        try:
+            self._client = HubSpot(access_token=creds["access_token"])
+            self._authenticated = True
+            logger.info("Connected to HubSpot")
+        except Exception as e:
+            raise AuthenticationError(
+                f"Failed to authenticate with HubSpot: {e}"
+            ) from e
 
     def fetch_records(
         self,
@@ -69,12 +84,31 @@ class HubSpotConnector(BaseConnector):
         until: datetime | None = None,
         limit: int | None = None,
     ) -> Generator[dict[str, Any], None, None]:
-        """Fetch records from HubSpot."""
+        """Fetch records from HubSpot.
+
+        Args:
+            since: Fetch records updated after this time (for incremental sync).
+            until: Fetch records updated before this time.
+            limit: Maximum records to fetch.
+
+        Yields:
+            Raw record dictionaries from HubSpot.
+
+        Raises:
+            ValueError: If object_type is not supported.
+        """
         if not self.is_authenticated:
             self.authenticate()
 
         params = self.config.connection_params
         object_type = params.get("object_type", "deals")
+
+        # Validate object type
+        if object_type not in VALID_OBJECT_TYPES:
+            raise ValueError(
+                f"Unsupported object type: '{object_type}'. "
+                f"Valid types are: {', '.join(sorted(VALID_OBJECT_TYPES))}"
+            )
 
         # Get the appropriate API
         if object_type == "deals":
@@ -83,11 +117,9 @@ class HubSpotConnector(BaseConnector):
         elif object_type == "contacts":
             api = self._client.crm.contacts.basic_api
             properties = ["email", "firstname", "lastname", "phone", "company"]
-        elif object_type == "companies":
+        else:  # companies
             api = self._client.crm.companies.basic_api
             properties = ["name", "domain", "industry", "annualrevenue"]
-        else:
-            raise ValueError(f"Unsupported object type: {object_type}")
 
         # Fetch with pagination
         after = None
@@ -105,11 +137,20 @@ class HubSpotConnector(BaseConnector):
                 # Filter by date if specified
                 updated = result.properties.get("hs_lastmodifieddate")
                 if updated:
-                    updated_dt = datetime.fromisoformat(updated.replace("Z", "+00:00"))
-                    if since and updated_dt < since:
-                        continue
-                    if until and updated_dt > until:
-                        continue
+                    try:
+                        updated_dt = datetime.fromisoformat(
+                            updated.replace("Z", "+00:00")
+                        )
+                        if since and updated_dt < since:
+                            continue
+                        if until and updated_dt > until:
+                            continue
+                    except (ValueError, TypeError) as e:
+                        logger.warning(
+                            f"Invalid date format in HubSpot record {result.id}: "
+                            f"{updated} - {e}"
+                        )
+                        # Include record anyway if date parsing fails
 
                 yield record
                 count += 1
@@ -122,17 +163,30 @@ class HubSpotConnector(BaseConnector):
             after = response.paging.next.after
 
     def get_schema(self) -> dict[str, str]:
-        """Get schema for the configured object type."""
+        """Get schema for the configured object type.
+
+        Returns:
+            Dictionary mapping property names to data types.
+
+        Raises:
+            SchemaError: If schema retrieval fails.
+        """
         if not self.is_authenticated:
             self.authenticate()
 
         params = self.config.connection_params
         object_type = params.get("object_type", "deals")
 
-        # Get properties for object type
-        response = self._client.crm.properties.core_api.get_all(object_type=object_type)
-
-        return {prop.name: prop.type for prop in response.results}
+        try:
+            # Get properties for object type
+            response = self._client.crm.properties.core_api.get_all(
+                object_type=object_type
+            )
+            return {prop.name: prop.type for prop in response.results}
+        except Exception as e:
+            raise SchemaError(
+                f"Failed to get schema for HubSpot object {object_type}: {e}"
+            ) from e
 
     def normalize(self, raw_records: list[dict[str, Any]]) -> list[Conversion]:
         """Normalize HubSpot records to Conversions."""
@@ -164,6 +218,20 @@ class HubSpotConnector(BaseConnector):
         )
         conversions: list[Conversion] = normalizer.normalize(raw_records)
         return conversions
+
+    def _cleanup_client(self) -> None:
+        """Clean up HubSpot client.
+
+        Note: hubspot-api-client doesn't have an explicit close method,
+        but we clear the client reference for consistency.
+        """
+        if self._client:
+            try:
+                # hubspot-api-client uses requests sessions internally
+                # Clear client reference to allow garbage collection
+                self._client = None
+            except Exception as e:
+                logger.warning(f"Error cleaning up HubSpot client: {e}")
 
 
 # Auto-register connector

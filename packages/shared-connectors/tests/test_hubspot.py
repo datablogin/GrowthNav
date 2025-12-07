@@ -6,7 +6,6 @@ from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from growthnav.connectors.config import ConnectorConfig, ConnectorType, SyncMode
 
 
