@@ -11,6 +11,7 @@ Example:
     from growthnav.connectors.adapters.salesforce import SalesforceConnector
     from growthnav.connectors.adapters.hubspot import HubSpotConnector
     from growthnav.connectors.adapters.zoho import ZohoConnector
+    from growthnav.connectors.adapters.olo import OLOConnector
 """
 
 from __future__ import annotations
@@ -53,3 +54,8 @@ except ImportError:  # pragma: no cover
 from growthnav.connectors.adapters.zoho import ZohoConnector as ZohoConnector
 
 __all__.append("ZohoConnector")
+
+# OLO connector uses httpx which is a core dependency
+from growthnav.connectors.adapters.olo import OLOConnector as OLOConnector  # noqa: E402
+
+__all__.append("OLOConnector")
