@@ -41,8 +41,9 @@ class TestAdaptersInit:
                 import importlib
                 adapters_module = importlib.import_module('growthnav.connectors.adapters')
 
-                # __all__ should be empty when snowflake import fails
-                assert adapters_module.__all__ == []
+                # SnowflakeConnector should NOT be in __all__ when snowflake import fails
+                # Other connectors (Salesforce, HubSpot, Zoho) may still be present
+                assert "SnowflakeConnector" not in adapters_module.__all__
         finally:
             # Restore original modules
             for key, value in original_modules.items():

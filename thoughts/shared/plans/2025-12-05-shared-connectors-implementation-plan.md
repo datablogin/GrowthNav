@@ -2483,10 +2483,10 @@ Add new connectors to the adapters module.
 ### Success Criteria
 
 #### Automated Verification:
-- [ ] `uv run pytest packages/shared-connectors/tests/test_salesforce.py -v` passes
-- [ ] `uv run pytest packages/shared-connectors/tests/test_hubspot.py -v` passes
-- [ ] `uv run pytest packages/shared-connectors/tests/test_zoho.py -v` passes
-- [ ] All connectors auto-register on import
+- [x] `uv run pytest packages/shared-connectors/tests/test_salesforce.py -v` passes
+- [x] `uv run pytest packages/shared-connectors/tests/test_hubspot.py -v` passes
+- [x] `uv run pytest packages/shared-connectors/tests/test_zoho.py -v` passes
+- [x] All connectors auto-register on import
 
 #### Manual Verification:
 - [ ] Salesforce connection works with test credentials
