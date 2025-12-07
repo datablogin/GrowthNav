@@ -374,6 +374,41 @@ class TestOLOConnector:
             with pytest.raises(httpx.HTTPStatusError):
                 list(connector.fetch_records())
 
+    def test_fetch_records_http_500_error(self, olo_config: ConnectorConfig) -> None:
+        """Test that other HTTP errors (e.g., 500) are re-raised."""
+        from growthnav.connectors.adapters.olo import OLOConnector
+
+        mock_response = MagicMock()
+        mock_response.status_code = 500
+        http_error = httpx.HTTPStatusError(
+            "Internal Server Error", request=MagicMock(), response=mock_response
+        )
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.get.return_value.raise_for_status.side_effect = http_error
+            mock_client_class.return_value = mock_client
+
+            connector = OLOConnector(olo_config)
+            connector.authenticate()
+
+            with pytest.raises(httpx.HTTPStatusError):
+                list(connector.fetch_records())
+
+    def test_fetch_records_client_not_initialized(
+        self, olo_config: ConnectorConfig
+    ) -> None:
+        """Test that RuntimeError is raised if client is not initialized."""
+        from growthnav.connectors.adapters.olo import OLOConnector
+
+        connector = OLOConnector(olo_config)
+        # Manually set authenticated without client
+        connector._authenticated = True
+        connector._client = None
+
+        with pytest.raises(RuntimeError, match="Client not initialized"):
+            list(connector.fetch_records())
+
     def test_get_schema(self, olo_config: ConnectorConfig) -> None:
         """Test schema retrieval."""
         from growthnav.connectors.adapters.olo import OLOConnector
