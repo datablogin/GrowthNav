@@ -45,10 +45,20 @@ class OLOConnector(BaseConnector):
     """
 
     connector_type = ConnectorType.OLO
+    _client: httpx.Client | None
 
     def __init__(self, config: ConnectorConfig):
-        """Initialize OLO connector."""
+        """Initialize OLO connector.
+
+        Args:
+            config: Connector configuration.
+
+        Raises:
+            ValueError: If required credentials are missing.
+        """
         super().__init__(config)
+        if "api_key" not in config.credentials:
+            raise ValueError("OLO connector requires 'api_key' in credentials")
 
     def authenticate(self) -> None:
         """Set up OLO API client.
@@ -67,6 +77,7 @@ class OLOConnector(BaseConnector):
                     "Authorization": f"Bearer {creds['api_key']}",
                     "Content-Type": "application/json",
                 },
+                timeout=httpx.Timeout(30.0, connect=10.0),
             )
             self._authenticated = True
             logger.info("Connected to OLO")
@@ -109,12 +120,29 @@ class OLOConnector(BaseConnector):
         page_size = 100
         count = 0
 
+        if not self._client:
+            raise RuntimeError("Client not initialized")
+
         while True:
             query["offset"] = offset
             query["limit"] = page_size
 
-            response = self._client.get("/v1/orders", params=query)
-            response.raise_for_status()
+            try:
+                response = self._client.get("/v1/orders", params=query)
+                response.raise_for_status()
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 401:
+                    raise AuthenticationError("Invalid OLO API key") from e
+                elif e.response.status_code == 403:
+                    raise AuthenticationError(
+                        "OLO API key does not have permission to access this resource"
+                    ) from e
+                elif e.response.status_code == 429:
+                    logger.warning("Rate limited by OLO API")
+                    raise
+                else:
+                    raise
+
             data = response.json()
 
             orders = data.get("orders", [])
@@ -173,6 +201,8 @@ class OLOConnector(BaseConnector):
             List of normalized Conversion objects.
         """
         # Build field map for OLO fields
+        # Priority order: id > order_number, total > subtotal, created_at > completed_at,
+        # customer_id > customer_email. The normalizer will use the first available field.
         field_map = {
             "id": "transaction_id",
             "order_number": "transaction_id",
@@ -200,7 +230,7 @@ class OLOConnector(BaseConnector):
             try:
                 self._client.close()
             except Exception as e:  # pragma: no cover
-                logger.warning(f"Error closing OLO HTTP client: {e}")
+                logger.warning(f"Error closing OLO HTTP client ({type(e).__name__}): {e}")
 
 
 # Auto-register connector

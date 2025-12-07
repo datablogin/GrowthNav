@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 from growthnav.connectors.config import ConnectorConfig, ConnectorType, SyncMode
 from growthnav.connectors.exceptions import AuthenticationError
@@ -55,6 +56,7 @@ class TestOLOConnector:
                     "Authorization": "Bearer test-api-key-12345",
                     "Content-Type": "application/json",
                 },
+                timeout=httpx.Timeout(30.0, connect=10.0),
             )
 
     def test_authenticate_custom_base_url(self, olo_config: ConnectorConfig) -> None:
@@ -77,7 +79,17 @@ class TestOLOConnector:
                     "Authorization": "Bearer test-api-key-12345",
                     "Content-Type": "application/json",
                 },
+                timeout=httpx.Timeout(30.0, connect=10.0),
             )
+
+    def test_missing_api_key(self, olo_config: ConnectorConfig) -> None:
+        """Test that missing api_key raises ValueError."""
+        from growthnav.connectors.adapters.olo import OLOConnector
+
+        olo_config.credentials = {}
+
+        with pytest.raises(ValueError, match="OLO connector requires 'api_key'"):
+            OLOConnector(olo_config)
 
     def test_authenticate_failure(self, olo_config: ConnectorConfig) -> None:
         """Test authentication failure raises AuthenticationError."""
@@ -296,6 +308,71 @@ class TestOLOConnector:
             list(connector.fetch_records())
 
             assert connector.is_authenticated is True
+
+    def test_fetch_records_http_401_error(self, olo_config: ConnectorConfig) -> None:
+        """Test that 401 errors raise AuthenticationError."""
+        from growthnav.connectors.adapters.olo import OLOConnector
+
+        mock_response = MagicMock()
+        mock_response.status_code = 401
+        http_error = httpx.HTTPStatusError(
+            "Unauthorized", request=MagicMock(), response=mock_response
+        )
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.get.return_value.raise_for_status.side_effect = http_error
+            mock_client_class.return_value = mock_client
+
+            connector = OLOConnector(olo_config)
+            connector.authenticate()
+
+            with pytest.raises(AuthenticationError, match="Invalid OLO API key"):
+                list(connector.fetch_records())
+
+    def test_fetch_records_http_403_error(self, olo_config: ConnectorConfig) -> None:
+        """Test that 403 errors raise AuthenticationError."""
+        from growthnav.connectors.adapters.olo import OLOConnector
+
+        mock_response = MagicMock()
+        mock_response.status_code = 403
+        http_error = httpx.HTTPStatusError(
+            "Forbidden", request=MagicMock(), response=mock_response
+        )
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.get.return_value.raise_for_status.side_effect = http_error
+            mock_client_class.return_value = mock_client
+
+            connector = OLOConnector(olo_config)
+            connector.authenticate()
+
+            with pytest.raises(
+                AuthenticationError, match="does not have permission"
+            ):
+                list(connector.fetch_records())
+
+    def test_fetch_records_http_429_error(self, olo_config: ConnectorConfig) -> None:
+        """Test that 429 errors are logged and re-raised."""
+        from growthnav.connectors.adapters.olo import OLOConnector
+
+        mock_response = MagicMock()
+        mock_response.status_code = 429
+        http_error = httpx.HTTPStatusError(
+            "Too Many Requests", request=MagicMock(), response=mock_response
+        )
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.get.return_value.raise_for_status.side_effect = http_error
+            mock_client_class.return_value = mock_client
+
+            connector = OLOConnector(olo_config)
+            connector.authenticate()
+
+            with pytest.raises(httpx.HTTPStatusError):
+                list(connector.fetch_records())
 
     def test_get_schema(self, olo_config: ConnectorConfig) -> None:
         """Test schema retrieval."""

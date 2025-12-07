@@ -476,7 +476,9 @@ class TestZohoConnector:
         assert registry.is_registered(ConnectorType.ZOHO)
 
         connector = registry.create(zoho_config)
-        assert isinstance(connector, ZohoConnector)
+        # Use type name comparison to avoid module import caching issues
+        assert type(connector).__name__ == ZohoConnector.__name__
+        assert type(connector).__module__ == ZohoConnector.__module__
 
     def test_context_manager(self, zoho_config: ConnectorConfig) -> None:
         """Test connector works as context manager."""
