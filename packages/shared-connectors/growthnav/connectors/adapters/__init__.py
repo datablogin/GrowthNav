@@ -11,9 +11,12 @@ Example:
     from growthnav.connectors.adapters.salesforce import SalesforceConnector
     from growthnav.connectors.adapters.hubspot import HubSpotConnector
     from growthnav.connectors.adapters.zoho import ZohoConnector
+    from growthnav.connectors.adapters.olo import OLOConnector
 """
 
 from __future__ import annotations
+
+__all__: list[str] = []
 
 # Import adapters to trigger auto-registration
 # These are conditionally imported since they have optional dependencies
@@ -21,38 +24,35 @@ try:
     from growthnav.connectors.adapters.snowflake import (
         SnowflakeConnector as SnowflakeConnector,
     )
+
+    __all__.append("SnowflakeConnector")
 except ImportError:
     # snowflake-connector-python not installed
-    SnowflakeConnector = None  # type: ignore[assignment, misc]
+    pass
 
 try:
     from growthnav.connectors.adapters.salesforce import (
         SalesforceConnector as SalesforceConnector,
     )
+
+    __all__.append("SalesforceConnector")
 except ImportError:  # pragma: no cover
     # simple-salesforce not installed
-    SalesforceConnector = None  # type: ignore[assignment, misc]
+    pass
 
 try:
     from growthnav.connectors.adapters.hubspot import (
         HubSpotConnector as HubSpotConnector,
     )
+
+    __all__.append("HubSpotConnector")
 except ImportError:  # pragma: no cover
     # hubspot-api-client not installed
-    HubSpotConnector = None  # type: ignore[assignment, misc]
+    pass
 
-# Zoho connector uses httpx which is a core dependency
+# Zoho and OLO connectors use httpx which is a core dependency
 from growthnav.connectors.adapters.olo import OLOConnector as OLOConnector
 from growthnav.connectors.adapters.zoho import ZohoConnector as ZohoConnector
-
-__all__: list[str] = []
-
-if SnowflakeConnector is not None:
-    __all__.append("SnowflakeConnector")
-if SalesforceConnector is not None:
-    __all__.append("SalesforceConnector")
-if HubSpotConnector is not None:
-    __all__.append("HubSpotConnector")
 
 __all__.append("ZohoConnector")
 __all__.append("OLOConnector")
