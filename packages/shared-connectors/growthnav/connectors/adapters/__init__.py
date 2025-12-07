@@ -35,7 +35,7 @@ try:
     )
 
     __all__.append("SalesforceConnector")
-except ImportError:
+except ImportError:  # pragma: no cover
     # simple-salesforce not installed
     pass
 
@@ -45,7 +45,7 @@ try:
     )
 
     __all__.append("HubSpotConnector")
-except ImportError:
+except ImportError:  # pragma: no cover
     # hubspot-api-client not installed
     pass
 

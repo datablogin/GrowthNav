@@ -230,7 +230,7 @@ class HubSpotConnector(BaseConnector):
                 # hubspot-api-client uses requests sessions internally
                 # Clear client reference to allow garbage collection
                 self._client = None
-            except Exception as e:
+            except Exception as e:  # pragma: no cover
                 logger.warning(f"Error cleaning up HubSpot client: {e}")
 
 
