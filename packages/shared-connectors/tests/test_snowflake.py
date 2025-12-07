@@ -14,7 +14,7 @@ from growthnav.connectors.exceptions import AuthenticationError, SchemaError
 class TestAdaptersInit:
     """Tests for adapters __init__.py module."""
 
-    def test_adapters_import_error_handling(self) -> None:
+    def test_adapters_import_error_handling_snowflake(self) -> None:
         """Test adapters module handles ImportError gracefully when snowflake not installed."""
         # Store original modules
         original_modules = {}
@@ -51,7 +51,6 @@ class TestAdaptersInit:
                     sys.modules[key] = value
             # Re-import to restore state
             import growthnav.connectors.adapters  # noqa: F401
-
 
 @pytest.fixture
 def snowflake_config() -> ConnectorConfig:

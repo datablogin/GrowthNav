@@ -690,6 +690,130 @@ class TestZohoConnector:
             assert "zohoapis.com" in token_call[0][0]
 
 
+    def test_invalid_module_raises_error(self, zoho_config: ConnectorConfig) -> None:
+        """Test invalid module name raises ValueError."""
+        zoho_config.connection_params["module"] = "InvalidModule"
+
+        mock_api_client = MagicMock()
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_token_response = MagicMock()
+            mock_token_response.json.return_value = {"access_token": "token"}
+            mock_token_response.raise_for_status = MagicMock()
+
+            mock_token_client = MagicMock()
+            mock_token_client.post.return_value = mock_token_response
+            mock_token_client.__enter__ = MagicMock(return_value=mock_token_client)
+            mock_token_client.__exit__ = MagicMock(return_value=False)
+
+            mock_client_class.side_effect = [mock_token_client, mock_api_client]
+
+            from growthnav.connectors.adapters.zoho import ZohoConnector
+
+            connector = ZohoConnector(zoho_config)
+            connector.authenticate()
+
+            with pytest.raises(ValueError, match="Unsupported Zoho module"):
+                list(connector.fetch_records())
+
+    def test_invalid_domain_raises_error(self, zoho_config: ConnectorConfig) -> None:
+        """Test invalid domain raises ValueError."""
+        zoho_config.connection_params["domain"] = "evil-domain.com"
+
+        from growthnav.connectors.adapters.zoho import ZohoConnector
+
+        connector = ZohoConnector(zoho_config)
+
+        with pytest.raises(ValueError, match="Invalid Zoho domain"):
+            connector.authenticate()
+
+    def test_authenticate_failure(self, zoho_config: ConnectorConfig) -> None:
+        """Test authentication failure raises AuthenticationError."""
+        from growthnav.connectors.exceptions import AuthenticationError
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_token_client = MagicMock()
+            mock_token_client.post.side_effect = Exception("Connection refused")
+            mock_token_client.__enter__ = MagicMock(return_value=mock_token_client)
+            mock_token_client.__exit__ = MagicMock(return_value=False)
+
+            mock_client_class.return_value = mock_token_client
+
+            from growthnav.connectors.adapters.zoho import ZohoConnector
+
+            connector = ZohoConnector(zoho_config)
+
+            with pytest.raises(AuthenticationError, match="Failed to authenticate"):
+                connector.authenticate()
+
+    def test_fetch_records_with_invalid_date_format(
+        self, zoho_config: ConnectorConfig
+    ) -> None:
+        """Test records with invalid date format are still included with warning."""
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "data": [
+                {"id": "001", "Modified_Time": "invalid-date-format"},
+            ],
+            "info": {"more_records": False},
+        }
+        mock_response.raise_for_status = MagicMock()
+
+        mock_api_client = MagicMock()
+        mock_api_client.get.return_value = mock_response
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_token_response = MagicMock()
+            mock_token_response.json.return_value = {"access_token": "token"}
+            mock_token_response.raise_for_status = MagicMock()
+
+            mock_token_client = MagicMock()
+            mock_token_client.post.return_value = mock_token_response
+            mock_token_client.__enter__ = MagicMock(return_value=mock_token_client)
+            mock_token_client.__exit__ = MagicMock(return_value=False)
+
+            mock_client_class.side_effect = [mock_token_client, mock_api_client]
+
+            from growthnav.connectors.adapters.zoho import ZohoConnector
+
+            connector = ZohoConnector(zoho_config)
+            connector.authenticate()
+
+            since = datetime(2024, 1, 1, tzinfo=UTC)
+            records = list(connector.fetch_records(since=since))
+
+            # Record should be included even with invalid date
+            assert len(records) == 1
+            assert records[0]["id"] == "001"
+
+    def test_get_schema_failure(self, zoho_config: ConnectorConfig) -> None:
+        """Test schema retrieval failure raises SchemaError."""
+        from growthnav.connectors.exceptions import SchemaError
+
+        mock_api_client = MagicMock()
+        mock_api_client.get.side_effect = Exception("API error")
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_token_response = MagicMock()
+            mock_token_response.json.return_value = {"access_token": "token"}
+            mock_token_response.raise_for_status = MagicMock()
+
+            mock_token_client = MagicMock()
+            mock_token_client.post.return_value = mock_token_response
+            mock_token_client.__enter__ = MagicMock(return_value=mock_token_client)
+            mock_token_client.__exit__ = MagicMock(return_value=False)
+
+            mock_client_class.side_effect = [mock_token_client, mock_api_client]
+
+            from growthnav.connectors.adapters.zoho import ZohoConnector
+
+            connector = ZohoConnector(zoho_config)
+            connector.authenticate()
+
+            with pytest.raises(SchemaError, match="Failed to get schema"):
+                connector.get_schema()
+
+
 class TestZohoConnectorSync:
     """Tests for ZohoConnector sync functionality."""
 

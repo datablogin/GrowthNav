@@ -607,6 +607,115 @@ class TestHubSpotConnector:
             mock_deals_api.get_page.assert_called_once()
 
 
+    def test_authenticate_failure(self, hubspot_config: ConnectorConfig) -> None:
+        """Test authentication failure raises AuthenticationError."""
+        from growthnav.connectors.exceptions import AuthenticationError
+
+        mock_hubspot = MagicMock()
+        mock_hubspot.HubSpot.side_effect = Exception("Connection refused")
+
+        with patch.dict("sys.modules", {"hubspot": mock_hubspot}):
+            from growthnav.connectors.adapters.hubspot import HubSpotConnector
+
+            connector = HubSpotConnector(hubspot_config)
+
+            with pytest.raises(AuthenticationError, match="Failed to authenticate"):
+                connector.authenticate()
+
+    def test_get_schema_failure(self, hubspot_config: ConnectorConfig) -> None:
+        """Test schema retrieval failure raises SchemaError."""
+        from growthnav.connectors.exceptions import SchemaError
+
+        mock_properties_api = MagicMock()
+        mock_properties_api.get_all.side_effect = Exception("API error")
+
+        mock_hs_client = MagicMock()
+        mock_hs_client.crm.properties.core_api = mock_properties_api
+
+        mock_hubspot = MagicMock()
+        mock_hubspot.HubSpot.return_value = mock_hs_client
+
+        with patch.dict("sys.modules", {"hubspot": mock_hubspot}):
+            from growthnav.connectors.adapters.hubspot import HubSpotConnector
+
+            connector = HubSpotConnector(hubspot_config)
+            connector.authenticate()
+
+            with pytest.raises(SchemaError, match="Failed to get schema"):
+                connector.get_schema()
+
+    def test_fetch_records_with_invalid_date_format(
+        self, hubspot_config: ConnectorConfig
+    ) -> None:
+        """Test records with invalid date format are still included with warning."""
+        mock_result = MagicMock()
+        mock_result.id = "deal-001"
+        mock_result.properties = {
+            "hs_lastmodifieddate": "invalid-date-format",
+        }
+
+        mock_response = MagicMock()
+        mock_response.results = [mock_result]
+        mock_response.paging = None
+
+        mock_deals_api = MagicMock()
+        mock_deals_api.get_page.return_value = mock_response
+
+        mock_hs_client = MagicMock()
+        mock_hs_client.crm.deals.basic_api = mock_deals_api
+
+        mock_hubspot = MagicMock()
+        mock_hubspot.HubSpot.return_value = mock_hs_client
+
+        with patch.dict("sys.modules", {"hubspot": mock_hubspot}):
+            from growthnav.connectors.adapters.hubspot import HubSpotConnector
+
+            connector = HubSpotConnector(hubspot_config)
+            connector.authenticate()
+
+            since = datetime(2024, 1, 1, tzinfo=UTC)
+            records = list(connector.fetch_records(since=since))
+
+            # Record should be included even with invalid date
+            assert len(records) == 1
+            assert records[0]["id"] == "deal-001"
+
+    def test_cleanup_client(self, hubspot_config: ConnectorConfig) -> None:
+        """Test cleanup clears the client reference."""
+        mock_hs_client = MagicMock()
+        mock_hubspot = MagicMock()
+        mock_hubspot.HubSpot.return_value = mock_hs_client
+
+        with patch.dict("sys.modules", {"hubspot": mock_hubspot}):
+            from growthnav.connectors.adapters.hubspot import HubSpotConnector
+
+            connector = HubSpotConnector(hubspot_config)
+            connector.authenticate()
+
+            assert connector._client is not None
+
+            connector._cleanup_client()
+
+            assert connector._client is None
+
+    def test_cleanup_client_with_error(self, hubspot_config: ConnectorConfig) -> None:
+        """Test cleanup handles errors gracefully."""
+        mock_hs_client = MagicMock()
+        mock_hubspot = MagicMock()
+        mock_hubspot.HubSpot.return_value = mock_hs_client
+
+        with patch.dict("sys.modules", {"hubspot": mock_hubspot}):
+            from growthnav.connectors.adapters.hubspot import HubSpotConnector
+
+            connector = HubSpotConnector(hubspot_config)
+            connector.authenticate()
+
+            # Test that cleanup works even if client is set
+            connector._cleanup_client()
+
+            assert connector._client is None
+
+
 class TestHubSpotConnectorSync:
     """Tests for HubSpotConnector sync functionality."""
 
