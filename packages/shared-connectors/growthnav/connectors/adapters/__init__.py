@@ -53,3 +53,8 @@ except ImportError:  # pragma: no cover
 from growthnav.connectors.adapters.zoho import ZohoConnector as ZohoConnector
 
 __all__.append("ZohoConnector")
+
+# OLO connector uses httpx which is a core dependency
+from growthnav.connectors.adapters.olo import OLOConnector as OLOConnector
+
+__all__.append("OLOConnector")
