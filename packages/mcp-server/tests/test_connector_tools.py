@@ -159,6 +159,28 @@ def test_configure_data_source_invalid_type(mock_connector_type_class):
     assert "Unknown connector type" in result["error"]
 
 
+def test_configure_data_source_both_credentials():
+    """Test configuration fails when both credentials and secret_path provided."""
+    from growthnav_mcp.server import mcp
+
+    # Get the underlying function
+    configure_data_source = mcp._tool_manager._tools["configure_data_source"].fn
+
+    # Execute with both credentials options
+    result = configure_data_source(
+        customer_id="acme",
+        connector_type="snowflake",
+        name="Test",
+        connection_params={},
+        credentials={"user": "test"},
+        credentials_secret_path="projects/my-project/secrets/my-secret",
+    )
+
+    # Verify
+    assert result["success"] is False
+    assert "either credentials or credentials_secret_path" in result["error"]
+
+
 @patch("growthnav.connectors.get_registry")
 @patch("growthnav.connectors.ConnectorType")
 def test_configure_data_source_unregistered(mock_connector_type_class, mock_get_registry):
@@ -323,6 +345,50 @@ async def test_discover_schema_invalid_type(mock_connector_type_class):
     # Verify
     assert result["success"] is False
     assert "Unknown connector type" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_discover_schema_sample_size_too_small():
+    """Test schema discovery with sample_size below minimum."""
+    from growthnav_mcp.server import mcp
+
+    # Get the underlying function
+    discover_schema = mcp._tool_manager._tools["discover_schema"].fn
+
+    # Execute with sample_size = 0
+    result = await discover_schema(
+        customer_id="acme",
+        connector_type="snowflake",
+        connection_params={},
+        credentials={},
+        sample_size=0,
+    )
+
+    # Verify
+    assert result["success"] is False
+    assert "sample_size must be between" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_discover_schema_sample_size_too_large():
+    """Test schema discovery with sample_size above maximum."""
+    from growthnav_mcp.server import mcp
+
+    # Get the underlying function
+    discover_schema = mcp._tool_manager._tools["discover_schema"].fn
+
+    # Execute with sample_size = 20000
+    result = await discover_schema(
+        customer_id="acme",
+        connector_type="snowflake",
+        connection_params={},
+        credentials={},
+        sample_size=20000,
+    )
+
+    # Verify
+    assert result["success"] is False
+    assert "sample_size must be between" in result["error"]
 
 
 @pytest.mark.asyncio
@@ -502,6 +568,32 @@ def test_sync_data_source_invalid_type(mock_connector_type_class):
     # Verify
     assert result["success"] is False
     assert "Unknown connector type" in result["error"]
+
+
+@patch("growthnav.connectors.ConnectorType")
+def test_sync_data_source_invalid_datetime(mock_connector_type_class):
+    """Test sync with invalid datetime format."""
+    from growthnav_mcp.server import mcp
+
+    # Get the underlying function
+    sync_data_source = mcp._tool_manager._tools["sync_data_source"].fn
+
+    # Setup mock
+    mock_connector_type_class.return_value = Mock()
+
+    # Execute with invalid datetime
+    result = sync_data_source(
+        customer_id="acme",
+        connector_type="snowflake",
+        connection_params={},
+        credentials={},
+        since="not-a-valid-datetime",
+    )
+
+    # Verify
+    assert result["success"] is False
+    assert "Invalid ISO datetime format" in result["error"]
+    assert "not-a-valid-datetime" in result["error"]
 
 
 @patch("growthnav.connectors.get_registry")

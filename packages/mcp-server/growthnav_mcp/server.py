@@ -10,6 +10,8 @@ Unified MCP server exposing all GrowthNav capabilities:
 
 from __future__ import annotations
 
+import logging
+
 from fastmcp import FastMCP
 
 # Initialize server
@@ -339,6 +341,12 @@ def normalize_crm_data(
 # Connector Tools
 # =============================================================================
 
+_connector_logger = logging.getLogger(__name__)
+
+# Constants for validation
+_MAX_SAMPLE_SIZE = 10000
+_MIN_SAMPLE_SIZE = 1
+
 
 @mcp.tool()
 def list_connectors() -> list[dict]:
@@ -346,7 +354,7 @@ def list_connectors() -> list[dict]:
     List all available connector types.
 
     Returns:
-        List of connector types with their registration status.
+        List of connector types with their registration status and category.
     """
     from growthnav.connectors import ConnectorType, get_registry
 
@@ -363,7 +371,14 @@ def list_connectors() -> list[dict]:
 
 
 def _get_connector_category(ct) -> str:
-    """Get the category for a connector type."""
+    """Get the category for a connector type.
+
+    Args:
+        ct: The connector type enum value (ConnectorType).
+
+    Returns:
+        Category string (data_lake, pos, crm, olo, loyalty, or other).
+    """
     from growthnav.connectors import ConnectorType
 
     categories: dict[ConnectorType, str] = {
@@ -403,14 +418,35 @@ def configure_data_source(
         connector_type: Connector type (snowflake, salesforce, hubspot, etc.)
         name: Human-readable name for this connection
         connection_params: Connection-specific parameters
-        credentials: Direct credentials (use Secret Manager in production)
-        credentials_secret_path: Path to credentials in Secret Manager
+        credentials: Direct credentials (INSECURE - for development/testing only)
+        credentials_secret_path: Path to credentials in Secret Manager (RECOMMENDED)
         field_overrides: Custom field mappings
 
     Returns:
         Configuration result with test connection status.
+
+    Security:
+        - ALWAYS use credentials_secret_path in production environments
+        - The credentials parameter should only be used for testing/development
+        - Credentials are never logged or persisted by this tool
     """
     from growthnav.connectors import ConnectorConfig, ConnectorType, get_registry
+
+    _connector_logger.info(
+        "Configuring data source",
+        extra={
+            "customer_id": customer_id,
+            "connector_type": connector_type,
+            "name": name,
+        },
+    )
+
+    # Validate credentials parameters
+    if credentials and credentials_secret_path:
+        return {
+            "success": False,
+            "error": "Specify either credentials or credentials_secret_path, not both",
+        }
 
     try:
         ct = ConnectorType(connector_type)
@@ -431,23 +467,34 @@ def configure_data_source(
         field_overrides=field_overrides or {},
     )
 
-    # Test connection
+    # Test connection with proper resource cleanup
     connector = registry.create(config)
-    if connector.test_connection():
-        return {
-            "success": True,
-            "config": {
-                "customer_id": config.customer_id,
-                "connector_type": config.connector_type.value,
-                "name": config.name,
-            },
-            "message": "Connection test successful",
-        }
-    else:
-        return {
-            "success": False,
-            "error": "Connection test failed. Check credentials and connection parameters.",
-        }
+    try:
+        if connector.test_connection():
+            _connector_logger.info(
+                "Connection test successful",
+                extra={"customer_id": customer_id, "connector_type": connector_type},
+            )
+            return {
+                "success": True,
+                "config": {
+                    "customer_id": config.customer_id,
+                    "connector_type": config.connector_type.value,
+                    "name": config.name,
+                },
+                "message": "Connection test successful",
+            }
+        else:
+            _connector_logger.warning(
+                "Connection test failed",
+                extra={"customer_id": customer_id, "connector_type": connector_type},
+            )
+            return {
+                "success": False,
+                "error": "Connection test failed. Check credentials and connection parameters.",
+            }
+    finally:
+        connector.close()
 
 
 @mcp.tool()
@@ -462,19 +509,46 @@ async def discover_schema(
     Discover and analyze schema from a data source.
 
     Uses LLM-assisted semantic detection to suggest field mappings.
+    This is an async operation due to LLM inference.
 
     Args:
         customer_id: Customer identifier
         connector_type: Connector type
         connection_params: Connection parameters
-        credentials: Credentials for the connection
-        sample_size: Number of records to sample
+        credentials: Credentials for the connection (use Secret Manager in production)
+        sample_size: Number of records to sample (1-10000, default 100)
 
     Returns:
         Schema analysis with mapping suggestions.
+
+    Performance:
+        - Samples up to `sample_size` records (default 100)
+        - Uses LLM for semantic analysis (may take 5-30 seconds)
+        - Recommended to cache results and rerun only when schema changes
+
+    Security:
+        - Credentials are never logged or persisted
+        - Use credentials_secret_path via configure_data_source for production
     """
     from growthnav.connectors import ConnectorConfig, ConnectorType, get_registry
     from growthnav.connectors.discovery import SchemaDiscovery
+
+    _connector_logger.info(
+        "Starting schema discovery",
+        extra={
+            "customer_id": customer_id,
+            "connector_type": connector_type,
+            "sample_size": sample_size,
+        },
+    )
+
+    # Validate sample_size
+    if sample_size < _MIN_SAMPLE_SIZE or sample_size > _MAX_SAMPLE_SIZE:
+        return {
+            "success": False,
+            "error": f"sample_size must be between {_MIN_SAMPLE_SIZE} and {_MAX_SAMPLE_SIZE}, "
+            f"got {sample_size}",
+        }
 
     try:
         ct = ConnectorType(connector_type)
@@ -496,15 +570,23 @@ async def discover_schema(
         connector.authenticate()
 
         # Fetch sample data
-        sample_data = []
-        for record in connector.fetch_records(limit=sample_size):
-            sample_data.append(record)
+        sample_data = list(connector.fetch_records(limit=sample_size))
 
         # Run schema discovery
         discovery = SchemaDiscovery()
         result = await discovery.analyze(
             data=sample_data,
             context=f"{connector_type} data for {customer_id}",
+        )
+
+        _connector_logger.info(
+            "Schema discovery completed",
+            extra={
+                "customer_id": customer_id,
+                "connector_type": connector_type,
+                "records_sampled": len(sample_data),
+                "mappings_suggested": len(result.get("suggestions", [])),
+            },
         )
 
         return {
@@ -524,6 +606,10 @@ async def discover_schema(
         }
 
     except Exception as e:
+        _connector_logger.exception(
+            "Schema discovery failed",
+            extra={"customer_id": customer_id, "connector_type": connector_type},
+        )
         return {"success": False, "error": str(e)}
     finally:
         connector.close()
@@ -545,21 +631,52 @@ def sync_data_source(
         customer_id: Customer identifier
         connector_type: Connector type
         connection_params: Connection parameters
-        credentials: Credentials for the connection
-        since: ISO datetime for incremental sync (optional)
+        credentials: Credentials for the connection (use Secret Manager in production)
+        since: ISO datetime for incremental sync (e.g., "2024-01-01T00:00:00")
         field_overrides: Custom field mappings
 
     Returns:
         Sync result with statistics.
+
+    Performance:
+        - Full sync fetches all records (can be slow for large datasets)
+        - Incremental sync (with 'since') only fetches new/updated records
+        - Consider scheduling syncs during off-peak hours
+
+    Security:
+        - Credentials are never logged or persisted
+        - Use credentials_secret_path via configure_data_source for production
     """
     from datetime import datetime
 
     from growthnav.connectors import ConnectorConfig, ConnectorType, SyncMode, get_registry
 
+    sync_mode = "incremental" if since else "full"
+    _connector_logger.info(
+        "Starting data sync",
+        extra={
+            "customer_id": customer_id,
+            "connector_type": connector_type,
+            "sync_mode": sync_mode,
+        },
+    )
+
     try:
         ct = ConnectorType(connector_type)
     except ValueError:
         return {"success": False, "error": f"Unknown connector type: {connector_type}"}
+
+    # Validate and parse 'since' datetime
+    since_dt = None
+    if since:
+        try:
+            since_dt = datetime.fromisoformat(since)
+        except ValueError as e:
+            return {
+                "success": False,
+                "error": f"Invalid ISO datetime format for 'since': {since}. "
+                f"Expected format: YYYY-MM-DDTHH:MM:SS. Error: {e}",
+            }
 
     config = ConnectorConfig(
         connector_type=ct,
@@ -575,8 +692,19 @@ def sync_data_source(
     connector = registry.create(config)
 
     try:
-        since_dt = datetime.fromisoformat(since) if since else None
         result = connector.sync(since=since_dt)
+
+        _connector_logger.info(
+            "Data sync completed",
+            extra={
+                "customer_id": customer_id,
+                "connector_type": connector_type,
+                "sync_mode": sync_mode,
+                "records_fetched": result.records_fetched,
+                "records_normalized": result.records_normalized,
+                "duration_seconds": result.duration_seconds,
+            },
+        )
 
         return {
             "success": result.success,
@@ -588,6 +716,10 @@ def sync_data_source(
         }
 
     except Exception as e:
+        _connector_logger.exception(
+            "Data sync failed",
+            extra={"customer_id": customer_id, "connector_type": connector_type},
+        )
         return {"success": False, "error": str(e)}
     finally:
         connector.close()
