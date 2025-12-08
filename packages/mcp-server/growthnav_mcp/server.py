@@ -336,6 +336,264 @@ def normalize_crm_data(
 
 
 # =============================================================================
+# Connector Tools
+# =============================================================================
+
+
+@mcp.tool()
+def list_connectors() -> list[dict]:
+    """
+    List all available connector types.
+
+    Returns:
+        List of connector types with their registration status.
+    """
+    from growthnav.connectors import ConnectorType, get_registry
+
+    registry = get_registry()
+
+    return [
+        {
+            "type": ct.value,
+            "registered": registry.is_registered(ct),
+            "category": _get_connector_category(ct),
+        }
+        for ct in ConnectorType
+    ]
+
+
+def _get_connector_category(ct) -> str:
+    """Get the category for a connector type."""
+    from growthnav.connectors import ConnectorType
+
+    categories: dict[ConnectorType, str] = {
+        ConnectorType.SNOWFLAKE: "data_lake",
+        ConnectorType.BIGQUERY: "data_lake",
+        ConnectorType.TOAST: "pos",
+        ConnectorType.SQUARE: "pos",
+        ConnectorType.CLOVER: "pos",
+        ConnectorType.LIGHTSPEED: "pos",
+        ConnectorType.SALESFORCE: "crm",
+        ConnectorType.HUBSPOT: "crm",
+        ConnectorType.ZOHO: "crm",
+        ConnectorType.OLO: "olo",
+        ConnectorType.OTTER: "olo",
+        ConnectorType.CHOWLY: "olo",
+        ConnectorType.FISHBOWL: "loyalty",
+        ConnectorType.PUNCHH: "loyalty",
+    }
+    return categories.get(ct, "other")
+
+
+@mcp.tool()
+def configure_data_source(
+    customer_id: str,
+    connector_type: str,
+    name: str,
+    connection_params: dict,
+    credentials: dict | None = None,
+    credentials_secret_path: str | None = None,
+    field_overrides: dict | None = None,
+) -> dict:
+    """
+    Configure a new data source connector for a customer.
+
+    Args:
+        customer_id: Customer identifier
+        connector_type: Connector type (snowflake, salesforce, hubspot, etc.)
+        name: Human-readable name for this connection
+        connection_params: Connection-specific parameters
+        credentials: Direct credentials (use Secret Manager in production)
+        credentials_secret_path: Path to credentials in Secret Manager
+        field_overrides: Custom field mappings
+
+    Returns:
+        Configuration result with test connection status.
+    """
+    from growthnav.connectors import ConnectorConfig, ConnectorType, get_registry
+
+    try:
+        ct = ConnectorType(connector_type)
+    except ValueError:
+        return {"success": False, "error": f"Unknown connector type: {connector_type}"}
+
+    registry = get_registry()
+    if not registry.is_registered(ct):
+        return {"success": False, "error": f"Connector not available: {connector_type}"}
+
+    config = ConnectorConfig(
+        connector_type=ct,
+        customer_id=customer_id,
+        name=name,
+        connection_params=connection_params,
+        credentials=credentials or {},
+        credentials_secret_path=credentials_secret_path,
+        field_overrides=field_overrides or {},
+    )
+
+    # Test connection
+    connector = registry.create(config)
+    if connector.test_connection():
+        return {
+            "success": True,
+            "config": {
+                "customer_id": config.customer_id,
+                "connector_type": config.connector_type.value,
+                "name": config.name,
+            },
+            "message": "Connection test successful",
+        }
+    else:
+        return {
+            "success": False,
+            "error": "Connection test failed. Check credentials and connection parameters.",
+        }
+
+
+@mcp.tool()
+async def discover_schema(
+    customer_id: str,
+    connector_type: str,
+    connection_params: dict,
+    credentials: dict,
+    sample_size: int = 100,
+) -> dict:
+    """
+    Discover and analyze schema from a data source.
+
+    Uses LLM-assisted semantic detection to suggest field mappings.
+
+    Args:
+        customer_id: Customer identifier
+        connector_type: Connector type
+        connection_params: Connection parameters
+        credentials: Credentials for the connection
+        sample_size: Number of records to sample
+
+    Returns:
+        Schema analysis with mapping suggestions.
+    """
+    from growthnav.connectors import ConnectorConfig, ConnectorType, get_registry
+    from growthnav.connectors.discovery import SchemaDiscovery
+
+    try:
+        ct = ConnectorType(connector_type)
+    except ValueError:
+        return {"success": False, "error": f"Unknown connector type: {connector_type}"}
+
+    config = ConnectorConfig(
+        connector_type=ct,
+        customer_id=customer_id,
+        name="schema_discovery",
+        connection_params=connection_params,
+        credentials=credentials,
+    )
+
+    registry = get_registry()
+    connector = registry.create(config)
+
+    try:
+        connector.authenticate()
+
+        # Fetch sample data
+        sample_data = []
+        for record in connector.fetch_records(limit=sample_size):
+            sample_data.append(record)
+
+        # Run schema discovery
+        discovery = SchemaDiscovery()
+        result = await discovery.analyze(
+            data=sample_data,
+            context=f"{connector_type} data for {customer_id}",
+        )
+
+        return {
+            "success": True,
+            "source_schema": connector.get_schema(),
+            "suggested_mappings": [
+                {
+                    "source": s.source_field,
+                    "target": s.target_field,
+                    "confidence": s.confidence,
+                    "reason": s.reason,
+                }
+                for s in result["suggestions"]
+            ],
+            "field_map": result["field_map"],
+            "confidence_summary": result["confidence_summary"],
+        }
+
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+    finally:
+        connector.close()
+
+
+@mcp.tool()
+def sync_data_source(
+    customer_id: str,
+    connector_type: str,
+    connection_params: dict,
+    credentials: dict,
+    since: str | None = None,
+    field_overrides: dict | None = None,
+) -> dict:
+    """
+    Sync data from a configured connector.
+
+    Args:
+        customer_id: Customer identifier
+        connector_type: Connector type
+        connection_params: Connection parameters
+        credentials: Credentials for the connection
+        since: ISO datetime for incremental sync (optional)
+        field_overrides: Custom field mappings
+
+    Returns:
+        Sync result with statistics.
+    """
+    from datetime import datetime
+
+    from growthnav.connectors import ConnectorConfig, ConnectorType, SyncMode, get_registry
+
+    try:
+        ct = ConnectorType(connector_type)
+    except ValueError:
+        return {"success": False, "error": f"Unknown connector type: {connector_type}"}
+
+    config = ConnectorConfig(
+        connector_type=ct,
+        customer_id=customer_id,
+        name="sync",
+        connection_params=connection_params,
+        credentials=credentials,
+        field_overrides=field_overrides or {},
+        sync_mode=SyncMode.INCREMENTAL if since else SyncMode.FULL,
+    )
+
+    registry = get_registry()
+    connector = registry.create(config)
+
+    try:
+        since_dt = datetime.fromisoformat(since) if since else None
+        result = connector.sync(since=since_dt)
+
+        return {
+            "success": result.success,
+            "records_fetched": result.records_fetched,
+            "records_normalized": result.records_normalized,
+            "records_failed": result.records_failed,
+            "duration_seconds": result.duration_seconds,
+            "error": result.error,
+        }
+
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+    finally:
+        connector.close()
+
+
+# =============================================================================
 # Resources
 # =============================================================================
 

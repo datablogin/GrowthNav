@@ -3004,14 +3004,14 @@ class OnboardingRequest:
 ### Success Criteria
 
 #### Automated Verification:
-- [ ] `uv run pytest packages/mcp-server/tests/test_connector_tools.py -v` passes
-- [ ] MCP tools are registered and callable
-- [ ] discover_schema returns sensible suggestions
+- [x] `uv run pytest packages/mcp-server/tests/test_connector_tools.py -v` passes
+- [x] MCP tools are registered and callable
+- [x] discover_schema returns sensible suggestions
 
 #### Manual Verification:
-- [ ] list_connectors shows all available types
-- [ ] configure_data_source validates connections
-- [ ] sync_data_source fetches and normalizes data
+- [x] list_connectors shows all available types
+- [x] configure_data_source validates connections
+- [x] sync_data_source fetches and normalizes data
 
 **Implementation Note**: After completing this phase and all automated verification passes, the full implementation is complete.
 
