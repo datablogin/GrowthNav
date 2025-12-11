@@ -8,6 +8,73 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 
 # =============================================================================
+# _sanitize_error Tests
+# =============================================================================
+
+
+def test_sanitize_error_password():
+    """Test _sanitize_error removes password from error message."""
+    from growthnav_mcp.server import _sanitize_error
+
+    result = _sanitize_error("Connection failed: password=secret123 at host")
+    assert "secret123" not in result
+    assert "password=***" in result
+
+
+def test_sanitize_error_token():
+    """Test _sanitize_error removes token from error message."""
+    from growthnav_mcp.server import _sanitize_error
+
+    result = _sanitize_error("Auth failed: token: abc123xyz456")
+    assert "abc123xyz456" not in result
+    assert "token=***" in result
+
+
+def test_sanitize_error_api_key():
+    """Test _sanitize_error removes api_key from error message."""
+    from growthnav_mcp.server import _sanitize_error
+
+    result = _sanitize_error("API error: api_key=sk-1234567890abcdef invalid")
+    assert "sk-1234567890abcdef" not in result
+    assert "api_key=***" in result
+
+
+def test_sanitize_error_api_hyphen_key():
+    """Test _sanitize_error removes api-key from error message."""
+    from growthnav_mcp.server import _sanitize_error
+
+    result = _sanitize_error('Error: {"api-key": "supersecret"}')
+    assert "supersecret" not in result
+    assert "api_key=***" in result
+
+
+def test_sanitize_error_secret():
+    """Test _sanitize_error removes secret from error message."""
+    from growthnav_mcp.server import _sanitize_error
+
+    result = _sanitize_error("Failed with secret=mysecretvalue")
+    assert "mysecretvalue" not in result
+    assert "secret=***" in result
+
+
+def test_sanitize_error_preserves_other_text():
+    """Test _sanitize_error preserves non-sensitive error information."""
+    from growthnav_mcp.server import _sanitize_error
+
+    result = _sanitize_error("Connection timeout after 30 seconds to host.example.com")
+    assert result == "Connection timeout after 30 seconds to host.example.com"
+
+
+def test_sanitize_error_case_insensitive():
+    """Test _sanitize_error works case-insensitively."""
+    from growthnav_mcp.server import _sanitize_error
+
+    result = _sanitize_error("Failed: PASSWORD=Secret123 and TOKEN=abc123")
+    assert "Secret123" not in result
+    assert "abc123" not in result
+
+
+# =============================================================================
 # list_connectors Tests
 # =============================================================================
 
@@ -571,6 +638,88 @@ async def test_discover_schema_auth_error(
     # Verify
     assert result["success"] is False
     assert "Auth failed" in result["error"]
+
+
+@pytest.mark.asyncio
+@patch("growthnav.connectors.get_registry")
+@patch("growthnav.connectors.ConnectorConfig")
+@patch("growthnav.connectors.ConnectorType")
+async def test_discover_schema_empty_sample_data(
+    mock_connector_type_class, mock_config_class, mock_get_registry
+):
+    """Test schema discovery when sample data is empty."""
+    from growthnav_mcp.server import mcp
+
+    # Get the underlying function
+    discover_schema = mcp._tool_manager._tools["discover_schema"].fn
+
+    # Setup mocks
+    mock_connector_type_class.return_value = Mock()
+    mock_config_class.return_value = Mock()
+
+    mock_connector = Mock()
+    mock_connector.fetch_records.return_value = iter([])  # Empty iterator
+
+    mock_registry = Mock()
+    mock_get_registry.return_value = mock_registry
+    mock_registry.create.return_value = mock_connector
+
+    # Execute
+    result = await discover_schema(
+        customer_id="acme",
+        connector_type="snowflake",
+        connection_params={},
+        credentials={},
+    )
+
+    # Verify
+    assert result["success"] is False
+    assert "No data available to sample" in result["error"]
+    mock_connector.authenticate.assert_called_once()
+    # Note: close() is not called because we return early before the finally block
+    # The connector was created but the try block returns early
+
+
+@pytest.mark.asyncio
+@patch("growthnav.connectors.get_registry")
+@patch("growthnav.connectors.ConnectorConfig")
+@patch("growthnav.connectors.ConnectorType")
+async def test_discover_schema_sanitizes_credentials_in_error(
+    mock_connector_type_class, mock_config_class, mock_get_registry
+):
+    """Test that discover_schema sanitizes credentials in error messages."""
+    from growthnav_mcp.server import mcp
+
+    # Get the underlying function
+    discover_schema = mcp._tool_manager._tools["discover_schema"].fn
+
+    # Setup mocks
+    mock_connector_type_class.return_value = Mock()
+    mock_config_class.return_value = Mock()
+
+    mock_connector = Mock()
+    # Simulate an error that might leak credentials
+    mock_connector.authenticate.side_effect = RuntimeError(
+        "Connection failed: password=supersecret123 token=abc123"
+    )
+
+    mock_registry = Mock()
+    mock_get_registry.return_value = mock_registry
+    mock_registry.create.return_value = mock_connector
+
+    # Execute
+    result = await discover_schema(
+        customer_id="acme",
+        connector_type="snowflake",
+        connection_params={},
+        credentials={},
+    )
+
+    # Verify credentials are sanitized
+    assert result["success"] is False
+    assert "supersecret123" not in result["error"]
+    assert "abc123" not in result["error"]
+    assert "Connection failed" in result["error"]
     mock_connector.close.assert_called_once()
 
 

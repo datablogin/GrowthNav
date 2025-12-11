@@ -11,8 +11,13 @@ Unified MCP server exposing all GrowthNav capabilities:
 from __future__ import annotations
 
 import logging
+import re
+from typing import TYPE_CHECKING
 
 from fastmcp import FastMCP
+
+if TYPE_CHECKING:
+    from growthnav.connectors import ConnectorType
 
 # Initialize server
 mcp = FastMCP(
@@ -348,6 +353,33 @@ _MAX_SAMPLE_SIZE = 10000
 _MIN_SAMPLE_SIZE = 1
 
 
+def _sanitize_error(error_msg: str) -> str:
+    """Remove potential credentials from error messages.
+
+    Sanitizes error messages to prevent accidental credential leakage
+    when exceptions include sensitive information.
+
+    Args:
+        error_msg: The original error message.
+
+    Returns:
+        Sanitized error message with credentials replaced by '***'.
+    """
+    sanitized = re.sub(
+        r'password["\'\s:=]+[^\s&"\']+', "password=***", error_msg, flags=re.IGNORECASE
+    )
+    sanitized = re.sub(
+        r'token["\'\s:=]+[^\s&"\']+', "token=***", sanitized, flags=re.IGNORECASE
+    )
+    sanitized = re.sub(
+        r'api[_-]?key["\'\s:=]+[^\s&"\']+', "api_key=***", sanitized, flags=re.IGNORECASE
+    )
+    sanitized = re.sub(
+        r'secret["\'\s:=]+[^\s&"\']+', "secret=***", sanitized, flags=re.IGNORECASE
+    )
+    return sanitized
+
+
 @mcp.tool()
 def list_connectors() -> list[dict]:
     """
@@ -370,11 +402,11 @@ def list_connectors() -> list[dict]:
     ]
 
 
-def _get_connector_category(ct) -> str:
+def _get_connector_category(ct: ConnectorType) -> str:
     """Get the category for a connector type.
 
     Args:
-        ct: The connector type enum value (ConnectorType).
+        ct: The connector type enum value.
 
     Returns:
         Category string (data_lake, pos, crm, olo, loyalty, or other).
@@ -515,7 +547,7 @@ def configure_data_source(
             "Connection test error",
             extra={"customer_id": customer_id, "connector_type": connector_type},
         )
-        return {"success": False, "error": f"Connection test error: {e}"}
+        return {"success": False, "error": f"Connection test error: {_sanitize_error(str(e))}"}
     finally:
         connector.close()
 
@@ -609,6 +641,14 @@ async def discover_schema(
         # Fetch sample data
         sample_data = list(connector.fetch_records(limit=sample_size))
 
+        # Validate sample data is not empty
+        if not sample_data:
+            return {
+                "success": False,
+                "error": "No data available to sample. Check connector configuration and "
+                "data source.",
+            }
+
         # Run schema discovery
         discovery = SchemaDiscovery()
         result = await discovery.analyze(
@@ -647,7 +687,7 @@ async def discover_schema(
             "Schema discovery failed",
             extra={"customer_id": customer_id, "connector_type": connector_type},
         )
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": _sanitize_error(str(e))}
     finally:
         connector.close()
 
@@ -776,7 +816,7 @@ def sync_data_source(
             "Data sync failed",
             extra={"customer_id": customer_id, "connector_type": connector_type},
         )
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": _sanitize_error(str(e))}
     finally:
         connector.close()
 
