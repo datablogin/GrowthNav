@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 from fastmcp import FastMCP
 
 if TYPE_CHECKING:
-    from growthnav.connectors import ConnectorType
+    from growthnav.connectors.config import ConnectorType
 
 # Initialize server
 mcp = FastMCP(
@@ -365,11 +365,35 @@ def _sanitize_error(error_msg: str) -> str:
     Returns:
         Sanitized error message with credentials replaced by '***'.
     """
+    # URL credentials must be sanitized first to avoid partial matching
+    # Pattern: https://user:password@host or user:password@host
     sanitized = re.sub(
-        r'password["\'\s:=]+[^\s&"\']+', "password=***", error_msg, flags=re.IGNORECASE
+        r'://[^:/@\s]+:[^@\s]+@', "://***:***@", error_msg, flags=re.IGNORECASE
     )
     sanitized = re.sub(
-        r'token["\'\s:=]+[^\s&"\']+', "token=***", sanitized, flags=re.IGNORECASE
+        r'(?<![:/])[a-zA-Z0-9_-]+:[^:/@\s]+@[a-zA-Z0-9.-]+',
+        "***:***@***",
+        sanitized,
+        flags=re.IGNORECASE,
+    )
+    # Bearer tokens: "Authorization: Bearer xyz123" or "Bearer abc123"
+    sanitized = re.sub(
+        r'Bearer\s+[A-Za-z0-9._~+/-]+=*', "Bearer ***", sanitized, flags=re.IGNORECASE
+    )
+    # Basic auth: "Authorization: Basic base64string"
+    sanitized = re.sub(
+        r'Basic\s+[A-Za-z0-9+/]+=*', "Basic ***", sanitized, flags=re.IGNORECASE
+    )
+    # Key-value style credentials (but not "token: Bearer" or "token: Basic")
+    sanitized = re.sub(
+        r'password["\'\s:=]+[^\s&"\']+', "password=***", sanitized, flags=re.IGNORECASE
+    )
+    # Negative lookahead to avoid matching "token: Bearer" or "token: Basic"
+    sanitized = re.sub(
+        r'token["\'\s:=]+(?!Bearer\s|Basic\s)[^\s&"\']+',
+        "token=***",
+        sanitized,
+        flags=re.IGNORECASE,
     )
     sanitized = re.sub(
         r'api[_-]?key["\'\s:=]+[^\s&"\']+', "api_key=***", sanitized, flags=re.IGNORECASE
@@ -497,6 +521,13 @@ def configure_data_source(
             "error": "Specify either credentials or credentials_secret_path, not both",
         }
 
+    # Validate that credentials are provided
+    if not credentials and not credentials_secret_path:
+        return {
+            "success": False,
+            "error": "Must provide either credentials or credentials_secret_path",
+        }
+
     try:
         ct = ConnectorType(connector_type)
     except ValueError:
@@ -600,6 +631,13 @@ async def discover_schema(
         return {
             "success": False,
             "error": "credentials must be a dictionary",
+        }
+
+    # Validate that credentials are not empty
+    if not credentials:
+        return {
+            "success": False,
+            "error": "credentials cannot be empty. Provide credentials for schema discovery.",
         }
 
     _connector_logger.info(
@@ -745,6 +783,13 @@ def sync_data_source(
         return {
             "success": False,
             "error": "field_overrides must be a dictionary",
+        }
+
+    # Validate that credentials are not empty
+    if not credentials:
+        return {
+            "success": False,
+            "error": "credentials cannot be empty. Provide credentials for data sync.",
         }
 
     sync_mode = "incremental" if since else "full"

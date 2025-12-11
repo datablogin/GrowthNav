@@ -74,6 +74,54 @@ def test_sanitize_error_case_insensitive():
     assert "abc123" not in result
 
 
+def test_sanitize_error_url_credentials():
+    """Test _sanitize_error removes URL credentials."""
+    from growthnav_mcp.server import _sanitize_error
+
+    # Test https://user:password@host
+    result = _sanitize_error("Connection failed: https://apikey:secret123@api.example.com/v1")
+    assert "apikey" not in result
+    assert "secret123" not in result
+    assert "://***:***@" in result
+    assert "api.example.com/v1" in result
+
+    # Test user:password@host (without protocol)
+    result = _sanitize_error("Error connecting to user:mypassword@database.host.com")
+    assert "user" not in result
+    assert "mypassword" not in result
+    assert "***:***@***" in result
+
+
+def test_sanitize_error_bearer_token():
+    """Test _sanitize_error removes Bearer tokens."""
+    from growthnav_mcp.server import _sanitize_error
+
+    # Test Authorization: Bearer xyz123
+    result = _sanitize_error("Auth failed: Authorization: Bearer xyz123abc456")
+    assert "xyz123abc456" not in result
+    assert "Bearer ***" in result
+
+    # Test standalone Bearer token
+    result = _sanitize_error("Invalid token: Bearer abc-123.def_456/ghi+789")
+    assert "abc-123.def_456/ghi+789" not in result
+    assert "Bearer ***" in result
+
+
+def test_sanitize_error_basic_auth():
+    """Test _sanitize_error removes Basic auth credentials."""
+    from growthnav_mcp.server import _sanitize_error
+
+    # Test Authorization: Basic base64string
+    result = _sanitize_error("Auth error: Authorization: Basic dXNlcjpwYXNzd29yZA==")
+    assert "dXNlcjpwYXNzd29yZA==" not in result
+    assert "Basic ***" in result
+
+    # Test standalone Basic auth
+    result = _sanitize_error("Failed with Basic YWRtaW46c2VjcmV0")
+    assert "YWRtaW46c2VjcmV0" not in result
+    assert "Basic ***" in result
+
+
 # =============================================================================
 # list_connectors Tests
 # =============================================================================
@@ -150,6 +198,47 @@ def test_get_connector_category():
     assert _get_connector_category(ConnectorType.PUNCHH) == "loyalty"
 
 
+def test_all_connector_types_have_categories():
+    """Test that all ConnectorType enum values have a category mapping.
+
+    This ensures when new ConnectorTypes are added, they get proper
+    category mappings and don't fall back to 'other' unexpectedly.
+    """
+    from growthnav.connectors import ConnectorType
+    from growthnav_mcp.server import _get_connector_category
+
+    # Define known categories that should have explicit mappings
+    known_categories = {"data_lake", "pos", "crm", "olo", "loyalty"}
+
+    for connector_type in ConnectorType:
+        category = _get_connector_category(connector_type)
+
+        # Verify every connector has a non-empty category
+        assert category, f"ConnectorType.{connector_type.name} has no category"
+
+        # Verify known types have explicit categories (not "other")
+        # This helps ensure new types get proper categorization
+        if connector_type in (
+            ConnectorType.SNOWFLAKE,
+            ConnectorType.BIGQUERY,
+            ConnectorType.TOAST,
+            ConnectorType.SQUARE,
+            ConnectorType.CLOVER,
+            ConnectorType.LIGHTSPEED,
+            ConnectorType.SALESFORCE,
+            ConnectorType.HUBSPOT,
+            ConnectorType.ZOHO,
+            ConnectorType.OLO,
+            ConnectorType.OTTER,
+            ConnectorType.CHOWLY,
+            ConnectorType.FISHBOWL,
+            ConnectorType.PUNCHH,
+        ):
+            assert (
+                category in known_categories
+            ), f"ConnectorType.{connector_type.name} has unexpected category: {category}"
+
+
 # =============================================================================
 # configure_data_source Tests
 # =============================================================================
@@ -219,6 +308,7 @@ def test_configure_data_source_invalid_type(mock_connector_type_class):
         connector_type="invalid_connector",
         name="Test",
         connection_params={},
+        credentials={"user": "test"},
     )
 
     # Verify
@@ -246,6 +336,26 @@ def test_configure_data_source_both_credentials():
     # Verify
     assert result["success"] is False
     assert "either credentials or credentials_secret_path" in result["error"]
+
+
+def test_configure_data_source_no_credentials():
+    """Test configuration fails when neither credentials nor secret_path provided."""
+    from growthnav_mcp.server import mcp
+
+    # Get the underlying function
+    configure_data_source = mcp._tool_manager._tools["configure_data_source"].fn
+
+    # Execute with no credentials
+    result = configure_data_source(
+        customer_id="acme",
+        connector_type="snowflake",
+        name="Test",
+        connection_params={},
+    )
+
+    # Verify
+    assert result["success"] is False
+    assert "Must provide either credentials or credentials_secret_path" in result["error"]
 
 
 def test_configure_data_source_invalid_connection_params_type():
@@ -342,6 +452,7 @@ def test_configure_data_source_connection_exception(
         connector_type="snowflake",
         name="Test",
         connection_params={},
+        credentials={"user": "test"},
     )
 
     # Verify
@@ -374,6 +485,7 @@ def test_configure_data_source_unregistered(mock_connector_type_class, mock_get_
         connector_type="punchh",
         name="Punchh Loyalty",
         connection_params={},
+        credentials={"user": "test"},
     )
 
     # Verify
@@ -413,6 +525,7 @@ def test_configure_data_source_connection_failed(
         connector_type="snowflake",
         name="Test",
         connection_params={},
+        credentials={"user": "test"},
     )
 
     # Verify
@@ -509,7 +622,7 @@ async def test_discover_schema_invalid_type(mock_connector_type_class):
         customer_id="acme",
         connector_type="invalid",
         connection_params={},
-        credentials={},
+        credentials={"user": "test"},
     )
 
     # Verify
@@ -530,7 +643,7 @@ async def test_discover_schema_invalid_connection_params_type():
         customer_id="acme",
         connector_type="snowflake",
         connection_params="not a dict",  # type: ignore
-        credentials={},
+        credentials={"user": "test"},
     )
 
     # Verify
@@ -560,6 +673,27 @@ async def test_discover_schema_invalid_credentials_type():
 
 
 @pytest.mark.asyncio
+async def test_discover_schema_empty_credentials():
+    """Test schema discovery with empty credentials dict."""
+    from growthnav_mcp.server import mcp
+
+    # Get the underlying function
+    discover_schema = mcp._tool_manager._tools["discover_schema"].fn
+
+    # Execute with empty credentials dict
+    result = await discover_schema(
+        customer_id="acme",
+        connector_type="snowflake",
+        connection_params={},
+        credentials={},
+    )
+
+    # Verify
+    assert result["success"] is False
+    assert "credentials cannot be empty" in result["error"]
+
+
+@pytest.mark.asyncio
 async def test_discover_schema_sample_size_too_small():
     """Test schema discovery with sample_size below minimum."""
     from growthnav_mcp.server import mcp
@@ -572,7 +706,7 @@ async def test_discover_schema_sample_size_too_small():
         customer_id="acme",
         connector_type="snowflake",
         connection_params={},
-        credentials={},
+        credentials={"user": "test"},
         sample_size=0,
     )
 
@@ -594,7 +728,7 @@ async def test_discover_schema_sample_size_too_large():
         customer_id="acme",
         connector_type="snowflake",
         connection_params={},
-        credentials={},
+        credentials={"user": "test"},
         sample_size=20000,
     )
 
@@ -632,7 +766,7 @@ async def test_discover_schema_auth_error(
         customer_id="acme",
         connector_type="snowflake",
         connection_params={},
-        credentials={},
+        credentials={"user": "test"},
     )
 
     # Verify
@@ -669,7 +803,7 @@ async def test_discover_schema_empty_sample_data(
         customer_id="acme",
         connector_type="snowflake",
         connection_params={},
-        credentials={},
+        credentials={"user": "test"},
     )
 
     # Verify
@@ -712,7 +846,7 @@ async def test_discover_schema_sanitizes_credentials_in_error(
         customer_id="acme",
         connector_type="snowflake",
         connection_params={},
-        credentials={},
+        credentials={"user": "test"},
     )
 
     # Verify credentials are sanitized
@@ -880,6 +1014,26 @@ def test_sync_data_source_invalid_credentials_type():
     assert "credentials must be a dictionary" in result["error"]
 
 
+def test_sync_data_source_empty_credentials():
+    """Test sync with empty credentials dict."""
+    from growthnav_mcp.server import mcp
+
+    # Get the underlying function
+    sync_data_source = mcp._tool_manager._tools["sync_data_source"].fn
+
+    # Execute with empty credentials dict
+    result = sync_data_source(
+        customer_id="acme",
+        connector_type="snowflake",
+        connection_params={},
+        credentials={},
+    )
+
+    # Verify
+    assert result["success"] is False
+    assert "credentials cannot be empty" in result["error"]
+
+
 def test_sync_data_source_invalid_field_overrides_type():
     """Test sync with invalid field_overrides type."""
     from growthnav_mcp.server import mcp
@@ -892,7 +1046,7 @@ def test_sync_data_source_invalid_field_overrides_type():
         customer_id="acme",
         connector_type="snowflake",
         connection_params={},
-        credentials={},
+        credentials={"user": "test"},
         field_overrides=["not", "a", "dict"],  # type: ignore
     )
 
@@ -917,7 +1071,7 @@ def test_sync_data_source_invalid_type(mock_connector_type_class):
         customer_id="acme",
         connector_type="invalid",
         connection_params={},
-        credentials={},
+        credentials={"user": "test"},
     )
 
     # Verify
@@ -941,7 +1095,7 @@ def test_sync_data_source_invalid_datetime(mock_connector_type_class):
         customer_id="acme",
         connector_type="snowflake",
         connection_params={},
-        credentials={},
+        credentials={"user": "test"},
         since="not-a-valid-datetime",
     )
 
@@ -989,7 +1143,7 @@ def test_sync_data_source_failure(
         customer_id="acme",
         connector_type="snowflake",
         connection_params={},
-        credentials={},
+        credentials={"user": "test"},
     )
 
     # Verify
@@ -1030,7 +1184,7 @@ def test_sync_data_source_exception(
         customer_id="acme",
         connector_type="snowflake",
         connection_params={},
-        credentials={},
+        credentials={"user": "test"},
     )
 
     # Verify
@@ -1078,7 +1232,7 @@ def test_sync_data_source_with_field_overrides(
         customer_id="acme",
         connector_type="snowflake",
         connection_params={},
-        credentials={},
+        credentials={"user": "test"},
         field_overrides={"source_amount": "transaction_value"},
     )
 
