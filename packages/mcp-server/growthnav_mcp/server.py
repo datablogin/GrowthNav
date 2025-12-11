@@ -441,6 +441,23 @@ def configure_data_source(
         },
     )
 
+    # Validate input types
+    if not isinstance(connection_params, dict):
+        return {
+            "success": False,
+            "error": "connection_params must be a dictionary",
+        }
+    if credentials is not None and not isinstance(credentials, dict):
+        return {
+            "success": False,
+            "error": "credentials must be a dictionary",
+        }
+    if field_overrides is not None and not isinstance(field_overrides, dict):
+        return {
+            "success": False,
+            "error": "field_overrides must be a dictionary",
+        }
+
     # Validate credentials parameters
     if credentials and credentials_secret_path:
         return {
@@ -467,7 +484,7 @@ def configure_data_source(
         field_overrides=field_overrides or {},
     )
 
-    # Test connection with proper resource cleanup
+    # Test connection with proper resource cleanup and exception handling
     connector = registry.create(config)
     try:
         if connector.test_connection():
@@ -493,6 +510,12 @@ def configure_data_source(
                 "success": False,
                 "error": "Connection test failed. Check credentials and connection parameters.",
             }
+    except Exception as e:
+        _connector_logger.exception(
+            "Connection test error",
+            extra={"customer_id": customer_id, "connector_type": connector_type},
+        )
+        return {"success": False, "error": f"Connection test error: {e}"}
     finally:
         connector.close()
 
@@ -514,7 +537,7 @@ async def discover_schema(
     Args:
         customer_id: Customer identifier
         connector_type: Connector type
-        connection_params: Connection parameters
+        connection_params: Connection parameters (dict with connector-specific settings)
         credentials: Credentials for the connection (use Secret Manager in production)
         sample_size: Number of records to sample (1-10000, default 100)
 
@@ -525,6 +548,8 @@ async def discover_schema(
         - Samples up to `sample_size` records (default 100)
         - Uses LLM for semantic analysis (may take 5-30 seconds)
         - Recommended to cache results and rerun only when schema changes
+        - WARNING: Large sample sizes (>1000) may consume significant memory if records
+          contain large fields (blobs, nested objects). Start with smaller samples.
 
     Security:
         - Credentials are never logged or persisted
@@ -532,6 +557,18 @@ async def discover_schema(
     """
     from growthnav.connectors import ConnectorConfig, ConnectorType, get_registry
     from growthnav.connectors.discovery import SchemaDiscovery
+
+    # Validate input types
+    if not isinstance(connection_params, dict):
+        return {
+            "success": False,
+            "error": "connection_params must be a dictionary",
+        }
+    if not isinstance(credentials, dict):
+        return {
+            "success": False,
+            "error": "credentials must be a dictionary",
+        }
 
     _connector_logger.info(
         "Starting schema discovery",
@@ -630,9 +667,11 @@ def sync_data_source(
     Args:
         customer_id: Customer identifier
         connector_type: Connector type
-        connection_params: Connection parameters
+        connection_params: Connection parameters (dict with connector-specific settings)
         credentials: Credentials for the connection (use Secret Manager in production)
-        since: ISO datetime for incremental sync (e.g., "2024-01-01T00:00:00")
+        since: ISO datetime for incremental sync (e.g., "2024-01-01T00:00:00" or
+               "2024-01-01T00:00:00+00:00" for UTC). Timezone-aware datetimes are
+               recommended; naive datetimes are treated as local time by the connector.
         field_overrides: Custom field mappings
 
     Returns:
@@ -650,6 +689,23 @@ def sync_data_source(
     from datetime import datetime
 
     from growthnav.connectors import ConnectorConfig, ConnectorType, SyncMode, get_registry
+
+    # Validate input types
+    if not isinstance(connection_params, dict):
+        return {
+            "success": False,
+            "error": "connection_params must be a dictionary",
+        }
+    if not isinstance(credentials, dict):
+        return {
+            "success": False,
+            "error": "credentials must be a dictionary",
+        }
+    if field_overrides is not None and not isinstance(field_overrides, dict):
+        return {
+            "success": False,
+            "error": "field_overrides must be a dictionary",
+        }
 
     sync_mode = "incremental" if since else "full"
     _connector_logger.info(

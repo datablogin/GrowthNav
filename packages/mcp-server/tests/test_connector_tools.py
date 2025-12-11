@@ -181,6 +181,109 @@ def test_configure_data_source_both_credentials():
     assert "either credentials or credentials_secret_path" in result["error"]
 
 
+def test_configure_data_source_invalid_connection_params_type():
+    """Test configuration fails when connection_params is not a dict."""
+    from growthnav_mcp.server import mcp
+
+    # Get the underlying function
+    configure_data_source = mcp._tool_manager._tools["configure_data_source"].fn
+
+    # Execute with invalid connection_params type
+    result = configure_data_source(
+        customer_id="acme",
+        connector_type="snowflake",
+        name="Test",
+        connection_params="not a dict",  # type: ignore
+    )
+
+    # Verify
+    assert result["success"] is False
+    assert "connection_params must be a dictionary" in result["error"]
+
+
+def test_configure_data_source_invalid_credentials_type():
+    """Test configuration fails when credentials is not a dict."""
+    from growthnav_mcp.server import mcp
+
+    # Get the underlying function
+    configure_data_source = mcp._tool_manager._tools["configure_data_source"].fn
+
+    # Execute with invalid credentials type
+    result = configure_data_source(
+        customer_id="acme",
+        connector_type="snowflake",
+        name="Test",
+        connection_params={},
+        credentials="not a dict",  # type: ignore
+    )
+
+    # Verify
+    assert result["success"] is False
+    assert "credentials must be a dictionary" in result["error"]
+
+
+def test_configure_data_source_invalid_field_overrides_type():
+    """Test configuration fails when field_overrides is not a dict."""
+    from growthnav_mcp.server import mcp
+
+    # Get the underlying function
+    configure_data_source = mcp._tool_manager._tools["configure_data_source"].fn
+
+    # Execute with invalid field_overrides type
+    result = configure_data_source(
+        customer_id="acme",
+        connector_type="snowflake",
+        name="Test",
+        connection_params={},
+        field_overrides=["not", "a", "dict"],  # type: ignore
+    )
+
+    # Verify
+    assert result["success"] is False
+    assert "field_overrides must be a dictionary" in result["error"]
+
+
+@patch("growthnav.connectors.get_registry")
+@patch("growthnav.connectors.ConnectorConfig")
+@patch("growthnav.connectors.ConnectorType")
+def test_configure_data_source_connection_exception(
+    mock_connector_type_class, mock_config_class, mock_get_registry
+):
+    """Test configuration when test_connection raises an exception."""
+    from growthnav_mcp.server import mcp
+
+    # Get the underlying function
+    configure_data_source = mcp._tool_manager._tools["configure_data_source"].fn
+
+    # Setup mocks
+    mock_connector_type = Mock()
+    mock_connector_type_class.return_value = mock_connector_type
+
+    mock_registry = Mock()
+    mock_get_registry.return_value = mock_registry
+    mock_registry.is_registered.return_value = True
+
+    mock_connector = Mock()
+    mock_connector.test_connection.side_effect = RuntimeError("Connection refused")
+    mock_registry.create.return_value = mock_connector
+
+    mock_config_class.return_value = Mock()
+
+    # Execute
+    result = configure_data_source(
+        customer_id="acme",
+        connector_type="snowflake",
+        name="Test",
+        connection_params={},
+    )
+
+    # Verify
+    assert result["success"] is False
+    assert "Connection test error" in result["error"]
+    assert "Connection refused" in result["error"]
+    mock_connector.close.assert_called_once()
+
+
 @patch("growthnav.connectors.get_registry")
 @patch("growthnav.connectors.ConnectorType")
 def test_configure_data_source_unregistered(mock_connector_type_class, mock_get_registry):
@@ -345,6 +448,48 @@ async def test_discover_schema_invalid_type(mock_connector_type_class):
     # Verify
     assert result["success"] is False
     assert "Unknown connector type" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_discover_schema_invalid_connection_params_type():
+    """Test schema discovery with invalid connection_params type."""
+    from growthnav_mcp.server import mcp
+
+    # Get the underlying function
+    discover_schema = mcp._tool_manager._tools["discover_schema"].fn
+
+    # Execute with invalid connection_params type
+    result = await discover_schema(
+        customer_id="acme",
+        connector_type="snowflake",
+        connection_params="not a dict",  # type: ignore
+        credentials={},
+    )
+
+    # Verify
+    assert result["success"] is False
+    assert "connection_params must be a dictionary" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_discover_schema_invalid_credentials_type():
+    """Test schema discovery with invalid credentials type."""
+    from growthnav_mcp.server import mcp
+
+    # Get the underlying function
+    discover_schema = mcp._tool_manager._tools["discover_schema"].fn
+
+    # Execute with invalid credentials type
+    result = await discover_schema(
+        customer_id="acme",
+        connector_type="snowflake",
+        connection_params={},
+        credentials="not a dict",  # type: ignore
+    )
+
+    # Verify
+    assert result["success"] is False
+    assert "credentials must be a dictionary" in result["error"]
 
 
 @pytest.mark.asyncio
@@ -544,6 +689,67 @@ def test_sync_data_source_incremental(
     since_arg = call_args.kwargs.get("since") or call_args[1].get("since")
     assert since_arg is not None
     assert isinstance(since_arg, datetime)
+
+
+def test_sync_data_source_invalid_connection_params_type():
+    """Test sync with invalid connection_params type."""
+    from growthnav_mcp.server import mcp
+
+    # Get the underlying function
+    sync_data_source = mcp._tool_manager._tools["sync_data_source"].fn
+
+    # Execute with invalid connection_params type
+    result = sync_data_source(
+        customer_id="acme",
+        connector_type="snowflake",
+        connection_params="not a dict",  # type: ignore
+        credentials={},
+    )
+
+    # Verify
+    assert result["success"] is False
+    assert "connection_params must be a dictionary" in result["error"]
+
+
+def test_sync_data_source_invalid_credentials_type():
+    """Test sync with invalid credentials type."""
+    from growthnav_mcp.server import mcp
+
+    # Get the underlying function
+    sync_data_source = mcp._tool_manager._tools["sync_data_source"].fn
+
+    # Execute with invalid credentials type
+    result = sync_data_source(
+        customer_id="acme",
+        connector_type="snowflake",
+        connection_params={},
+        credentials="not a dict",  # type: ignore
+    )
+
+    # Verify
+    assert result["success"] is False
+    assert "credentials must be a dictionary" in result["error"]
+
+
+def test_sync_data_source_invalid_field_overrides_type():
+    """Test sync with invalid field_overrides type."""
+    from growthnav_mcp.server import mcp
+
+    # Get the underlying function
+    sync_data_source = mcp._tool_manager._tools["sync_data_source"].fn
+
+    # Execute with invalid field_overrides type
+    result = sync_data_source(
+        customer_id="acme",
+        connector_type="snowflake",
+        connection_params={},
+        credentials={},
+        field_overrides=["not", "a", "dict"],  # type: ignore
+    )
+
+    # Verify
+    assert result["success"] is False
+    assert "field_overrides must be a dictionary" in result["error"]
 
 
 @patch("growthnav.connectors.ConnectorType")
