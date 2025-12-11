@@ -10,7 +10,14 @@ Unified MCP server exposing all GrowthNav capabilities:
 
 from __future__ import annotations
 
+import logging
+import re
+from typing import TYPE_CHECKING
+
 from fastmcp import FastMCP
+
+if TYPE_CHECKING:
+    from growthnav.connectors.config import ConnectorType
 
 # Initialize server
 mcp = FastMCP(
@@ -333,6 +340,530 @@ def normalize_crm_data(
     conversions = normalizer.normalize(leads)
 
     return [c.to_dict() for c in conversions]
+
+
+# =============================================================================
+# Connector Tools
+# =============================================================================
+
+_connector_logger = logging.getLogger(__name__)
+
+# Constants for validation
+_MAX_SAMPLE_SIZE = 10000
+_MIN_SAMPLE_SIZE = 1
+
+
+def _sanitize_error(error_msg: str) -> str:
+    """Remove potential credentials from error messages.
+
+    Sanitizes error messages to prevent accidental credential leakage
+    when exceptions include sensitive information.
+
+    Args:
+        error_msg: The original error message.
+
+    Returns:
+        Sanitized error message with credentials replaced by '***'.
+    """
+    # URL credentials must be sanitized first to avoid partial matching
+    # Pattern: https://user:password@host or user:password@host
+    sanitized = re.sub(
+        r'://[^:/@\s]+:[^@\s]+@', "://***:***@", error_msg, flags=re.IGNORECASE
+    )
+    sanitized = re.sub(
+        r'(?<![:/])[a-zA-Z0-9_-]+:[^:/@\s]+@[a-zA-Z0-9.-]+',
+        "***:***@***",
+        sanitized,
+        flags=re.IGNORECASE,
+    )
+    # Bearer tokens: "Authorization: Bearer xyz123" or "Bearer abc123"
+    sanitized = re.sub(
+        r'Bearer\s+[A-Za-z0-9._~+/-]+=*', "Bearer ***", sanitized, flags=re.IGNORECASE
+    )
+    # Basic auth: "Authorization: Basic base64string"
+    sanitized = re.sub(
+        r'Basic\s+[A-Za-z0-9+/]+=*', "Basic ***", sanitized, flags=re.IGNORECASE
+    )
+    # Key-value style credentials (but not "token: Bearer" or "token: Basic")
+    sanitized = re.sub(
+        r'password["\'\s:=]+[^\s&"\']+', "password=***", sanitized, flags=re.IGNORECASE
+    )
+    # Negative lookahead to avoid matching "token: Bearer" or "token: Basic"
+    sanitized = re.sub(
+        r'token["\'\s:=]+(?!Bearer\s|Basic\s)[^\s&"\']+',
+        "token=***",
+        sanitized,
+        flags=re.IGNORECASE,
+    )
+    sanitized = re.sub(
+        r'api[_-]?key["\'\s:=]+[^\s&"\']+', "api_key=***", sanitized, flags=re.IGNORECASE
+    )
+    sanitized = re.sub(
+        r'secret["\'\s:=]+[^\s&"\']+', "secret=***", sanitized, flags=re.IGNORECASE
+    )
+    return sanitized
+
+
+@mcp.tool()
+def list_connectors() -> list[dict]:
+    """
+    List all available connector types.
+
+    Returns:
+        List of connector types with their registration status and category.
+    """
+    from growthnav.connectors import ConnectorType, get_registry
+
+    registry = get_registry()
+
+    return [
+        {
+            "type": ct.value,
+            "registered": registry.is_registered(ct),
+            "category": _get_connector_category(ct),
+        }
+        for ct in ConnectorType
+    ]
+
+
+def _get_connector_category(ct: ConnectorType) -> str:
+    """Get the category for a connector type.
+
+    Args:
+        ct: The connector type enum value.
+
+    Returns:
+        Category string (data_lake, pos, crm, olo, loyalty, or other).
+    """
+    from growthnav.connectors import ConnectorType
+
+    categories: dict[ConnectorType, str] = {
+        ConnectorType.SNOWFLAKE: "data_lake",
+        ConnectorType.BIGQUERY: "data_lake",
+        ConnectorType.TOAST: "pos",
+        ConnectorType.SQUARE: "pos",
+        ConnectorType.CLOVER: "pos",
+        ConnectorType.LIGHTSPEED: "pos",
+        ConnectorType.SALESFORCE: "crm",
+        ConnectorType.HUBSPOT: "crm",
+        ConnectorType.ZOHO: "crm",
+        ConnectorType.OLO: "olo",
+        ConnectorType.OTTER: "olo",
+        ConnectorType.CHOWLY: "olo",
+        ConnectorType.FISHBOWL: "loyalty",
+        ConnectorType.PUNCHH: "loyalty",
+    }
+    return categories.get(ct, "other")
+
+
+@mcp.tool()
+def configure_data_source(
+    customer_id: str,
+    connector_type: str,
+    name: str,
+    connection_params: dict,
+    credentials: dict | None = None,
+    credentials_secret_path: str | None = None,
+    field_overrides: dict | None = None,
+) -> dict:
+    """
+    Configure a new data source connector for a customer.
+
+    Args:
+        customer_id: Customer identifier
+        connector_type: Connector type (snowflake, salesforce, hubspot, etc.)
+        name: Human-readable name for this connection
+        connection_params: Connection-specific parameters
+        credentials: Direct credentials (INSECURE - for development/testing only)
+        credentials_secret_path: Path to credentials in Secret Manager (RECOMMENDED)
+        field_overrides: Custom field mappings
+
+    Returns:
+        Configuration result with test connection status.
+
+    Security:
+        - ALWAYS use credentials_secret_path in production environments
+        - The credentials parameter should only be used for testing/development
+        - Credentials are never logged or persisted by this tool
+    """
+    from growthnav.connectors import ConnectorConfig, ConnectorType, get_registry
+
+    _connector_logger.info(
+        "Configuring data source",
+        extra={
+            "customer_id": customer_id,
+            "connector_type": connector_type,
+            "name": name,
+        },
+    )
+
+    # Validate input types
+    if not isinstance(connection_params, dict):
+        return {
+            "success": False,
+            "error": "connection_params must be a dictionary",
+        }
+    if credentials is not None and not isinstance(credentials, dict):
+        return {
+            "success": False,
+            "error": "credentials must be a dictionary",
+        }
+    if field_overrides is not None and not isinstance(field_overrides, dict):
+        return {
+            "success": False,
+            "error": "field_overrides must be a dictionary",
+        }
+
+    # Validate credentials parameters
+    if credentials and credentials_secret_path:
+        return {
+            "success": False,
+            "error": "Specify either credentials or credentials_secret_path, not both",
+        }
+
+    # Validate that credentials are provided
+    if not credentials and not credentials_secret_path:
+        return {
+            "success": False,
+            "error": "Must provide either credentials or credentials_secret_path",
+        }
+
+    try:
+        ct = ConnectorType(connector_type)
+    except ValueError:
+        return {"success": False, "error": f"Unknown connector type: {connector_type}"}
+
+    registry = get_registry()
+    if not registry.is_registered(ct):
+        return {"success": False, "error": f"Connector not available: {connector_type}"}
+
+    config = ConnectorConfig(
+        connector_type=ct,
+        customer_id=customer_id,
+        name=name,
+        connection_params=connection_params,
+        credentials=credentials or {},
+        credentials_secret_path=credentials_secret_path,
+        field_overrides=field_overrides or {},
+    )
+
+    # Test connection with proper resource cleanup and exception handling
+    connector = registry.create(config)
+    try:
+        if connector.test_connection():
+            _connector_logger.info(
+                "Connection test successful",
+                extra={"customer_id": customer_id, "connector_type": connector_type},
+            )
+            return {
+                "success": True,
+                "config": {
+                    "customer_id": config.customer_id,
+                    "connector_type": config.connector_type.value,
+                    "name": config.name,
+                },
+                "message": "Connection test successful",
+            }
+        else:
+            _connector_logger.warning(
+                "Connection test failed",
+                extra={"customer_id": customer_id, "connector_type": connector_type},
+            )
+            return {
+                "success": False,
+                "error": "Connection test failed. Check credentials and connection parameters.",
+            }
+    except Exception as e:
+        _connector_logger.exception(
+            "Connection test error",
+            extra={"customer_id": customer_id, "connector_type": connector_type},
+        )
+        return {"success": False, "error": f"Connection test error: {_sanitize_error(str(e))}"}
+    finally:
+        connector.close()
+
+
+@mcp.tool()
+async def discover_schema(
+    customer_id: str,
+    connector_type: str,
+    connection_params: dict,
+    credentials: dict,
+    sample_size: int = 100,
+) -> dict:
+    """
+    Discover and analyze schema from a data source.
+
+    Uses LLM-assisted semantic detection to suggest field mappings.
+    This is an async operation due to LLM inference.
+
+    Args:
+        customer_id: Customer identifier
+        connector_type: Connector type
+        connection_params: Connection parameters (dict with connector-specific settings)
+        credentials: Credentials for the connection (use Secret Manager in production)
+        sample_size: Number of records to sample (1-10000, default 100)
+
+    Returns:
+        Schema analysis with mapping suggestions.
+
+    Performance:
+        - Samples up to `sample_size` records (default 100)
+        - Uses LLM for semantic analysis (may take 5-30 seconds)
+        - Recommended to cache results and rerun only when schema changes
+        - WARNING: Large sample sizes (>1000) may consume significant memory if records
+          contain large fields (blobs, nested objects). Start with smaller samples.
+
+    Security:
+        - Credentials are never logged or persisted
+        - Use credentials_secret_path via configure_data_source for production
+    """
+    from growthnav.connectors import ConnectorConfig, ConnectorType, get_registry
+    from growthnav.connectors.discovery import SchemaDiscovery
+
+    # Validate input types
+    if not isinstance(connection_params, dict):
+        return {
+            "success": False,
+            "error": "connection_params must be a dictionary",
+        }
+    if not isinstance(credentials, dict):
+        return {
+            "success": False,
+            "error": "credentials must be a dictionary",
+        }
+
+    # Validate that credentials are not empty
+    if not credentials:
+        return {
+            "success": False,
+            "error": "credentials cannot be empty. Provide credentials for schema discovery.",
+        }
+
+    _connector_logger.info(
+        "Starting schema discovery",
+        extra={
+            "customer_id": customer_id,
+            "connector_type": connector_type,
+            "sample_size": sample_size,
+        },
+    )
+
+    # Validate sample_size
+    if sample_size < _MIN_SAMPLE_SIZE or sample_size > _MAX_SAMPLE_SIZE:
+        return {
+            "success": False,
+            "error": f"sample_size must be between {_MIN_SAMPLE_SIZE} and {_MAX_SAMPLE_SIZE}, "
+            f"got {sample_size}",
+        }
+
+    try:
+        ct = ConnectorType(connector_type)
+    except ValueError:
+        return {"success": False, "error": f"Unknown connector type: {connector_type}"}
+
+    config = ConnectorConfig(
+        connector_type=ct,
+        customer_id=customer_id,
+        name="schema_discovery",
+        connection_params=connection_params,
+        credentials=credentials,
+    )
+
+    registry = get_registry()
+    connector = registry.create(config)
+
+    try:
+        connector.authenticate()
+
+        # Fetch sample data
+        sample_data = list(connector.fetch_records(limit=sample_size))
+
+        # Validate sample data is not empty
+        if not sample_data:
+            return {
+                "success": False,
+                "error": "No data available to sample. Check connector configuration and "
+                "data source.",
+            }
+
+        # Run schema discovery
+        discovery = SchemaDiscovery()
+        result = await discovery.analyze(
+            data=sample_data,
+            context=f"{connector_type} data for {customer_id}",
+        )
+
+        _connector_logger.info(
+            "Schema discovery completed",
+            extra={
+                "customer_id": customer_id,
+                "connector_type": connector_type,
+                "records_sampled": len(sample_data),
+                "mappings_suggested": len(result.get("suggestions", [])),
+            },
+        )
+
+        return {
+            "success": True,
+            "source_schema": connector.get_schema(),
+            "suggested_mappings": [
+                {
+                    "source": s.source_field,
+                    "target": s.target_field,
+                    "confidence": s.confidence,
+                    "reason": s.reason,
+                }
+                for s in result["suggestions"]
+            ],
+            "field_map": result["field_map"],
+            "confidence_summary": result["confidence_summary"],
+        }
+
+    except Exception as e:
+        _connector_logger.exception(
+            "Schema discovery failed",
+            extra={"customer_id": customer_id, "connector_type": connector_type},
+        )
+        return {"success": False, "error": _sanitize_error(str(e))}
+    finally:
+        connector.close()
+
+
+@mcp.tool()
+def sync_data_source(
+    customer_id: str,
+    connector_type: str,
+    connection_params: dict,
+    credentials: dict,
+    since: str | None = None,
+    field_overrides: dict | None = None,
+) -> dict:
+    """
+    Sync data from a configured connector.
+
+    Args:
+        customer_id: Customer identifier
+        connector_type: Connector type
+        connection_params: Connection parameters (dict with connector-specific settings)
+        credentials: Credentials for the connection (use Secret Manager in production)
+        since: ISO datetime for incremental sync (e.g., "2024-01-01T00:00:00" or
+               "2024-01-01T00:00:00+00:00" for UTC). Timezone-aware datetimes are
+               recommended; naive datetimes are treated as local time by the connector.
+        field_overrides: Custom field mappings
+
+    Returns:
+        Sync result with statistics.
+
+    Performance:
+        - Full sync fetches all records (can be slow for large datasets)
+        - Incremental sync (with 'since') only fetches new/updated records
+        - Consider scheduling syncs during off-peak hours
+
+    Security:
+        - Credentials are never logged or persisted
+        - Use credentials_secret_path via configure_data_source for production
+    """
+    from datetime import datetime
+
+    from growthnav.connectors import ConnectorConfig, ConnectorType, SyncMode, get_registry
+
+    # Validate input types
+    if not isinstance(connection_params, dict):
+        return {
+            "success": False,
+            "error": "connection_params must be a dictionary",
+        }
+    if not isinstance(credentials, dict):
+        return {
+            "success": False,
+            "error": "credentials must be a dictionary",
+        }
+    if field_overrides is not None and not isinstance(field_overrides, dict):
+        return {
+            "success": False,
+            "error": "field_overrides must be a dictionary",
+        }
+
+    # Validate that credentials are not empty
+    if not credentials:
+        return {
+            "success": False,
+            "error": "credentials cannot be empty. Provide credentials for data sync.",
+        }
+
+    sync_mode = "incremental" if since else "full"
+    _connector_logger.info(
+        "Starting data sync",
+        extra={
+            "customer_id": customer_id,
+            "connector_type": connector_type,
+            "sync_mode": sync_mode,
+        },
+    )
+
+    try:
+        ct = ConnectorType(connector_type)
+    except ValueError:
+        return {"success": False, "error": f"Unknown connector type: {connector_type}"}
+
+    # Validate and parse 'since' datetime
+    since_dt = None
+    if since:
+        try:
+            since_dt = datetime.fromisoformat(since)
+        except ValueError as e:
+            return {
+                "success": False,
+                "error": f"Invalid ISO datetime format for 'since': {since}. "
+                f"Expected format: YYYY-MM-DDTHH:MM:SS. Error: {e}",
+            }
+
+    config = ConnectorConfig(
+        connector_type=ct,
+        customer_id=customer_id,
+        name="sync",
+        connection_params=connection_params,
+        credentials=credentials,
+        field_overrides=field_overrides or {},
+        sync_mode=SyncMode.INCREMENTAL if since else SyncMode.FULL,
+    )
+
+    registry = get_registry()
+    connector = registry.create(config)
+
+    try:
+        result = connector.sync(since=since_dt)
+
+        _connector_logger.info(
+            "Data sync completed",
+            extra={
+                "customer_id": customer_id,
+                "connector_type": connector_type,
+                "sync_mode": sync_mode,
+                "records_fetched": result.records_fetched,
+                "records_normalized": result.records_normalized,
+                "duration_seconds": result.duration_seconds,
+            },
+        )
+
+        return {
+            "success": result.success,
+            "records_fetched": result.records_fetched,
+            "records_normalized": result.records_normalized,
+            "records_failed": result.records_failed,
+            "duration_seconds": result.duration_seconds,
+            "error": result.error,
+        }
+
+    except Exception as e:
+        _connector_logger.exception(
+            "Data sync failed",
+            extra={"customer_id": customer_id, "connector_type": connector_type},
+        )
+        return {"success": False, "error": _sanitize_error(str(e))}
+    finally:
+        connector.close()
 
 
 # =============================================================================
