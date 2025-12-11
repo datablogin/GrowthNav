@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 from growthnav.connectors.config import ConnectorConfig, ConnectorType, SyncMode
 
@@ -856,3 +857,343 @@ class TestZohoConnectorSync:
             assert result.records_fetched == 2
             assert result.records_normalized == 2
             assert result.connector_name == "Test Zoho Connector"
+
+
+class TestZohoConnectorTokenRefresh:
+    """Tests for ZohoConnector token refresh functionality."""
+
+    def test_token_refresh_on_401_fetch_records(
+        self, zoho_config: ConnectorConfig
+    ) -> None:
+        """Test automatic token refresh when fetch_records gets 401."""
+        # First API call returns 401, then token refresh, then retry succeeds
+        mock_401_response = MagicMock()
+        mock_401_response.status_code = 401
+        mock_401_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "Unauthorized",
+            request=MagicMock(),
+            response=mock_401_response,
+        )
+
+        mock_success_response = MagicMock()
+        mock_success_response.json.return_value = {
+            "data": [{"id": "001", "Deal_Name": "Test Deal"}],
+            "info": {"more_records": False},
+        }
+        mock_success_response.raise_for_status = MagicMock()
+
+        mock_api_client = MagicMock()
+        # First call returns 401, second call succeeds (after token refresh)
+        mock_api_client.get.side_effect = [mock_401_response, mock_success_response]
+        mock_api_client.headers = {"Authorization": "Zoho-oauthtoken old_token"}
+
+        # Token refresh responses
+        mock_token_response_initial = MagicMock()
+        mock_token_response_initial.json.return_value = {"access_token": "initial_token"}
+        mock_token_response_initial.raise_for_status = MagicMock()
+
+        mock_token_response_refresh = MagicMock()
+        mock_token_response_refresh.json.return_value = {"access_token": "new_token"}
+        mock_token_response_refresh.raise_for_status = MagicMock()
+
+        with patch("httpx.Client") as mock_client_class:
+            # Initial auth token client
+            mock_token_client_initial = MagicMock()
+            mock_token_client_initial.post.return_value = mock_token_response_initial
+            mock_token_client_initial.__enter__ = MagicMock(
+                return_value=mock_token_client_initial
+            )
+            mock_token_client_initial.__exit__ = MagicMock(return_value=False)
+
+            # Refresh token client
+            mock_token_client_refresh = MagicMock()
+            mock_token_client_refresh.post.return_value = mock_token_response_refresh
+            mock_token_client_refresh.__enter__ = MagicMock(
+                return_value=mock_token_client_refresh
+            )
+            mock_token_client_refresh.__exit__ = MagicMock(return_value=False)
+
+            # Order: initial token client, API client, refresh token client
+            mock_client_class.side_effect = [
+                mock_token_client_initial,
+                mock_api_client,
+                mock_token_client_refresh,
+            ]
+
+            from growthnav.connectors.adapters.zoho import ZohoConnector
+
+            connector = ZohoConnector(zoho_config)
+            connector.authenticate()
+
+            records = list(connector.fetch_records())
+
+            # Should have gotten records after token refresh
+            assert len(records) == 1
+            assert records[0]["id"] == "001"
+
+            # Verify token was refreshed (client.get called twice)
+            assert mock_api_client.get.call_count == 2
+
+            # Verify authorization header was updated
+            assert mock_api_client.headers["Authorization"] == "Zoho-oauthtoken new_token"
+
+    def test_token_refresh_on_401_get_schema(
+        self, zoho_config: ConnectorConfig
+    ) -> None:
+        """Test automatic token refresh when get_schema gets 401."""
+        mock_401_response = MagicMock()
+        mock_401_response.status_code = 401
+        mock_401_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "Unauthorized",
+            request=MagicMock(),
+            response=mock_401_response,
+        )
+
+        mock_success_response = MagicMock()
+        mock_success_response.json.return_value = {
+            "fields": [
+                {"api_name": "Deal_Name", "data_type": "text"},
+                {"api_name": "Amount", "data_type": "currency"},
+            ]
+        }
+        mock_success_response.raise_for_status = MagicMock()
+
+        mock_api_client = MagicMock()
+        mock_api_client.get.side_effect = [mock_401_response, mock_success_response]
+        mock_api_client.headers = {"Authorization": "Zoho-oauthtoken old_token"}
+
+        mock_token_response_initial = MagicMock()
+        mock_token_response_initial.json.return_value = {"access_token": "initial_token"}
+        mock_token_response_initial.raise_for_status = MagicMock()
+
+        mock_token_response_refresh = MagicMock()
+        mock_token_response_refresh.json.return_value = {"access_token": "new_token"}
+        mock_token_response_refresh.raise_for_status = MagicMock()
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_token_client_initial = MagicMock()
+            mock_token_client_initial.post.return_value = mock_token_response_initial
+            mock_token_client_initial.__enter__ = MagicMock(
+                return_value=mock_token_client_initial
+            )
+            mock_token_client_initial.__exit__ = MagicMock(return_value=False)
+
+            mock_token_client_refresh = MagicMock()
+            mock_token_client_refresh.post.return_value = mock_token_response_refresh
+            mock_token_client_refresh.__enter__ = MagicMock(
+                return_value=mock_token_client_refresh
+            )
+            mock_token_client_refresh.__exit__ = MagicMock(return_value=False)
+
+            mock_client_class.side_effect = [
+                mock_token_client_initial,
+                mock_api_client,
+                mock_token_client_refresh,
+            ]
+
+            from growthnav.connectors.adapters.zoho import ZohoConnector
+
+            connector = ZohoConnector(zoho_config)
+            connector.authenticate()
+
+            schema = connector.get_schema()
+
+            assert schema["Deal_Name"] == "text"
+            assert schema["Amount"] == "currency"
+            assert mock_api_client.get.call_count == 2
+            assert mock_api_client.headers["Authorization"] == "Zoho-oauthtoken new_token"
+
+    def test_token_refresh_fails_raises_authentication_error(
+        self, zoho_config: ConnectorConfig
+    ) -> None:
+        """Test that failed token refresh raises AuthenticationError."""
+        from growthnav.connectors.exceptions import AuthenticationError
+
+        mock_401_response = MagicMock()
+        mock_401_response.status_code = 401
+        mock_401_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "Unauthorized",
+            request=MagicMock(),
+            response=mock_401_response,
+        )
+
+        mock_api_client = MagicMock()
+        mock_api_client.get.return_value = mock_401_response
+        mock_api_client.headers = {"Authorization": "Zoho-oauthtoken old_token"}
+
+        mock_token_response_initial = MagicMock()
+        mock_token_response_initial.json.return_value = {"access_token": "initial_token"}
+        mock_token_response_initial.raise_for_status = MagicMock()
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_token_client_initial = MagicMock()
+            mock_token_client_initial.post.return_value = mock_token_response_initial
+            mock_token_client_initial.__enter__ = MagicMock(
+                return_value=mock_token_client_initial
+            )
+            mock_token_client_initial.__exit__ = MagicMock(return_value=False)
+
+            # Token refresh will fail
+            mock_token_client_refresh = MagicMock()
+            mock_token_client_refresh.post.side_effect = Exception("Token refresh failed")
+            mock_token_client_refresh.__enter__ = MagicMock(
+                return_value=mock_token_client_refresh
+            )
+            mock_token_client_refresh.__exit__ = MagicMock(return_value=False)
+
+            mock_client_class.side_effect = [
+                mock_token_client_initial,
+                mock_api_client,
+                mock_token_client_refresh,
+            ]
+
+            from growthnav.connectors.adapters.zoho import ZohoConnector
+
+            connector = ZohoConnector(zoho_config)
+            connector.authenticate()
+
+            with pytest.raises(AuthenticationError, match="Failed to refresh"):
+                list(connector.fetch_records())
+
+    def test_max_retry_limit_exceeded(self, zoho_config: ConnectorConfig) -> None:
+        """Test that 401 after max retries raises HTTPStatusError."""
+        # Both calls return 401 - should fail after one retry attempt
+        mock_401_response = MagicMock()
+        mock_401_response.status_code = 401
+        mock_401_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "Unauthorized",
+            request=MagicMock(),
+            response=mock_401_response,
+        )
+
+        mock_api_client = MagicMock()
+        mock_api_client.get.return_value = mock_401_response
+        mock_api_client.headers = {"Authorization": "Zoho-oauthtoken old_token"}
+
+        mock_token_response = MagicMock()
+        mock_token_response.json.return_value = {"access_token": "token"}
+        mock_token_response.raise_for_status = MagicMock()
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_token_client = MagicMock()
+            mock_token_client.post.return_value = mock_token_response
+            mock_token_client.__enter__ = MagicMock(return_value=mock_token_client)
+            mock_token_client.__exit__ = MagicMock(return_value=False)
+
+            # Initial token, API client, refresh token (success but API still 401)
+            mock_client_class.side_effect = [
+                mock_token_client,
+                mock_api_client,
+                mock_token_client,
+            ]
+
+            from growthnav.connectors.adapters.zoho import ZohoConnector
+
+            connector = ZohoConnector(zoho_config)
+            connector.authenticate()
+
+            with pytest.raises(httpx.HTTPStatusError):
+                list(connector.fetch_records())
+
+            # Should have tried twice: initial call + 1 retry
+            assert mock_api_client.get.call_count == 2
+
+    def test_non_401_error_not_retried(self, zoho_config: ConnectorConfig) -> None:
+        """Test that non-401 HTTP errors are not retried."""
+        mock_500_response = MagicMock()
+        mock_500_response.status_code = 500
+        mock_500_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "Internal Server Error",
+            request=MagicMock(),
+            response=mock_500_response,
+        )
+
+        mock_api_client = MagicMock()
+        mock_api_client.get.return_value = mock_500_response
+        mock_api_client.headers = {}
+
+        mock_token_response = MagicMock()
+        mock_token_response.json.return_value = {"access_token": "token"}
+        mock_token_response.raise_for_status = MagicMock()
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_token_client = MagicMock()
+            mock_token_client.post.return_value = mock_token_response
+            mock_token_client.__enter__ = MagicMock(return_value=mock_token_client)
+            mock_token_client.__exit__ = MagicMock(return_value=False)
+
+            mock_client_class.side_effect = [mock_token_client, mock_api_client]
+
+            from growthnav.connectors.adapters.zoho import ZohoConnector
+
+            connector = ZohoConnector(zoho_config)
+            connector.authenticate()
+
+            with pytest.raises(httpx.HTTPStatusError):
+                list(connector.fetch_records())
+
+            # Should only have tried once - 500 is not retried
+            assert mock_api_client.get.call_count == 1
+
+    def test_domain_stored_for_token_refresh(
+        self, zoho_config: ConnectorConfig
+    ) -> None:
+        """Test that domain is stored during authentication for token refresh."""
+        zoho_config.connection_params["domain"] = "zohoapis.eu"
+
+        mock_token_response = MagicMock()
+        mock_token_response.json.return_value = {"access_token": "token"}
+        mock_token_response.raise_for_status = MagicMock()
+
+        mock_api_client = MagicMock()
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_token_client = MagicMock()
+            mock_token_client.post.return_value = mock_token_response
+            mock_token_client.__enter__ = MagicMock(return_value=mock_token_client)
+            mock_token_client.__exit__ = MagicMock(return_value=False)
+
+            mock_client_class.side_effect = [mock_token_client, mock_api_client]
+
+            from growthnav.connectors.adapters.zoho import ZohoConnector
+
+            connector = ZohoConnector(zoho_config)
+            connector.authenticate()
+
+            # Domain should be stored
+            assert connector._domain == "zohoapis.eu"
+
+            # Token URL should use the EU domain
+            call_args = mock_token_client.post.call_args
+            assert "zohoapis.eu" in call_args[0][0]
+
+    def test_update_client_authorization(self, zoho_config: ConnectorConfig) -> None:
+        """Test _update_client_authorization updates header correctly."""
+        mock_token_response = MagicMock()
+        mock_token_response.json.return_value = {"access_token": "initial_token"}
+        mock_token_response.raise_for_status = MagicMock()
+
+        mock_api_client = MagicMock()
+        mock_api_client.headers = {"Authorization": "Zoho-oauthtoken initial_token"}
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_token_client = MagicMock()
+            mock_token_client.post.return_value = mock_token_response
+            mock_token_client.__enter__ = MagicMock(return_value=mock_token_client)
+            mock_token_client.__exit__ = MagicMock(return_value=False)
+
+            mock_client_class.side_effect = [mock_token_client, mock_api_client]
+
+            from growthnav.connectors.adapters.zoho import ZohoConnector
+
+            connector = ZohoConnector(zoho_config)
+            connector.authenticate()
+
+            # Manually update access token and call update method
+            connector._access_token = "new_token"
+            connector._update_client_authorization()
+
+            assert (
+                mock_api_client.headers["Authorization"]
+                == "Zoho-oauthtoken new_token"
+            )

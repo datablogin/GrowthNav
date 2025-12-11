@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from datetime import datetime
-from typing import Any
+from typing import Any, TypeVar, cast
 
 import httpx
 
@@ -17,6 +17,8 @@ from growthnav.conversions import Conversion, CRMNormalizer
 from growthnav.conversions.schema import ConversionType
 
 logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
 
 # Valid Zoho CRM modules
 VALID_MODULES = {"Deals", "Leads", "Accounts", "Contacts", "Campaigns", "Cases"}
@@ -104,10 +106,14 @@ class ZohoConnector(BaseConnector):
 
     connector_type = ConnectorType.ZOHO
 
+    # Maximum number of token refresh retries
+    MAX_TOKEN_REFRESH_RETRIES = 1
+
     def __init__(self, config: ConnectorConfig):
         """Initialize Zoho connector."""
         super().__init__(config)
         self._access_token: str | None = None
+        self._domain: str | None = None
 
     def authenticate(self) -> None:
         """Get access token from Zoho.
@@ -116,12 +122,38 @@ class ZohoConnector(BaseConnector):
             ValueError: If domain is invalid.
             AuthenticationError: If authentication fails.
         """
-        creds = self.config.credentials
         params = self.config.connection_params
-        domain = _validate_domain(params.get("domain", "zohoapis.com"))
+        self._domain = _validate_domain(params.get("domain", "zohoapis.com"))
 
-        # Refresh access token
-        token_url = f"https://accounts.{domain}/oauth/v2/token"
+        try:
+            self._refresh_access_token()
+
+            self._client = httpx.Client(
+                base_url=f"https://www.{self._domain}/crm/v3",
+                headers={"Authorization": f"Zoho-oauthtoken {self._access_token}"},
+            )
+            self._authenticated = True
+            logger.info("Connected to Zoho CRM")
+        except Exception as e:
+            raise AuthenticationError(
+                f"Failed to authenticate with Zoho CRM: {e}"
+            ) from e
+
+    def _refresh_access_token(self) -> None:
+        """Refresh the access token using the refresh token.
+
+        This method is called during initial authentication and when a 401
+        response indicates the token has expired.
+
+        Raises:
+            AuthenticationError: If token refresh fails.
+        """
+        if not self._domain:
+            params = self.config.connection_params
+            self._domain = _validate_domain(params.get("domain", "zohoapis.com"))
+
+        creds = self.config.credentials
+        token_url = f"https://accounts.{self._domain}/oauth/v2/token"
 
         try:
             with httpx.Client() as client:
@@ -137,17 +169,53 @@ class ZohoConnector(BaseConnector):
                 response.raise_for_status()
                 data = response.json()
                 self._access_token = data["access_token"]
-
-            self._client = httpx.Client(
-                base_url=f"https://www.{domain}/crm/v3",
-                headers={"Authorization": f"Zoho-oauthtoken {self._access_token}"},
-            )
-            self._authenticated = True
-            logger.info("Connected to Zoho CRM")
+                logger.info("Zoho access token refreshed successfully")
         except Exception as e:
             raise AuthenticationError(
-                f"Failed to authenticate with Zoho CRM: {e}"
+                f"Failed to refresh Zoho access token: {e}"
             ) from e
+
+    def _update_client_authorization(self) -> None:
+        """Update the HTTP client with new authorization header.
+
+        Called after token refresh to update the client's auth header.
+        """
+        if self._client and self._access_token:
+            self._client.headers["Authorization"] = (
+                f"Zoho-oauthtoken {self._access_token}"
+            )
+
+    def _execute_with_token_refresh(
+        self, operation: Callable[[], T], operation_name: str = "API call"
+    ) -> T:
+        """Execute an API operation with automatic token refresh on 401.
+
+        Args:
+            operation: A callable that performs the API operation.
+            operation_name: Description of the operation for logging.
+
+        Returns:
+            The result of the operation.
+
+        Raises:
+            httpx.HTTPStatusError: If the request fails after retry.
+            AuthenticationError: If token refresh fails.
+        """
+        retries = 0
+        while True:
+            try:
+                return operation()
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 401 and retries < self.MAX_TOKEN_REFRESH_RETRIES:
+                    retries += 1
+                    logger.warning(
+                        f"Zoho {operation_name} received 401 Unauthorized. "
+                        f"Refreshing token (attempt {retries}/{self.MAX_TOKEN_REFRESH_RETRIES})..."
+                    )
+                    self._refresh_access_token()
+                    self._update_client_authorization()
+                    continue
+                raise
 
     def fetch_records(
         self,
@@ -178,14 +246,27 @@ class ZohoConnector(BaseConnector):
         page = 1
         count = 0
         while True:
-            response = self._client.get(
-                f"/{module}",
-                params={
-                    "page": page,
-                    "per_page": 200,
-                },
+            # Use token refresh wrapper for API call
+            # Capture current page value in closure to avoid B023 warning
+            current_page = page
+
+            def fetch_page(p: int = current_page) -> httpx.Response:
+                resp = cast(
+                    httpx.Response,
+                    self._client.get(
+                        f"/{module}",
+                        params={
+                            "page": p,
+                            "per_page": 200,
+                        },
+                    ),
+                )
+                resp.raise_for_status()
+                return resp
+
+            response = self._execute_with_token_refresh(
+                fetch_page, f"fetch {module} page {page}"
             )
-            response.raise_for_status()
             data = response.json()
 
             records = data.get("data", [])
@@ -240,13 +321,25 @@ class ZohoConnector(BaseConnector):
         module = _validate_module(params.get("module", "Deals"))
 
         try:
-            response = self._client.get("/settings/fields", params={"module": module})
-            response.raise_for_status()
+            def fetch_schema() -> httpx.Response:
+                resp = cast(
+                    httpx.Response,
+                    self._client.get("/settings/fields", params={"module": module}),
+                )
+                resp.raise_for_status()
+                return resp
+
+            response = self._execute_with_token_refresh(
+                fetch_schema, f"get schema for {module}"
+            )
 
             return {
                 field["api_name"]: field["data_type"]
                 for field in response.json().get("fields", [])
             }
+        except AuthenticationError:
+            # Re-raise authentication errors directly
+            raise
         except Exception as e:
             raise SchemaError(
                 f"Failed to get schema for Zoho module {module}: {e}"
