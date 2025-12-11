@@ -1197,3 +1197,86 @@ class TestZohoConnectorTokenRefresh:
                 mock_api_client.headers["Authorization"]
                 == "Zoho-oauthtoken new_token"
             )
+
+    def test_refresh_token_without_domain_set(
+        self, zoho_config: ConnectorConfig
+    ) -> None:
+        """Test _refresh_access_token sets domain if not already set."""
+        mock_token_response = MagicMock()
+        mock_token_response.json.return_value = {"access_token": "token"}
+        mock_token_response.raise_for_status = MagicMock()
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_token_client = MagicMock()
+            mock_token_client.post.return_value = mock_token_response
+            mock_token_client.__enter__ = MagicMock(return_value=mock_token_client)
+            mock_token_client.__exit__ = MagicMock(return_value=False)
+
+            mock_client_class.return_value = mock_token_client
+
+            from growthnav.connectors.adapters.zoho import ZohoConnector
+
+            connector = ZohoConnector(zoho_config)
+
+            # Ensure domain is not set
+            assert connector._domain is None
+
+            # Call _refresh_access_token directly without authenticate()
+            connector._refresh_access_token()
+
+            # Domain should now be set
+            assert connector._domain == "zohoapis.com"
+            assert connector._access_token == "token"
+
+    def test_get_schema_reraises_authentication_error(
+        self, zoho_config: ConnectorConfig
+    ) -> None:
+        """Test get_schema re-raises AuthenticationError when token refresh fails."""
+        from growthnav.connectors.exceptions import AuthenticationError
+
+        mock_401_response = MagicMock()
+        mock_401_response.status_code = 401
+        mock_401_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "Unauthorized",
+            request=MagicMock(),
+            response=mock_401_response,
+        )
+
+        mock_api_client = MagicMock()
+        mock_api_client.get.return_value = mock_401_response
+        mock_api_client.headers = {"Authorization": "Zoho-oauthtoken old_token"}
+
+        mock_token_response_initial = MagicMock()
+        mock_token_response_initial.json.return_value = {"access_token": "initial_token"}
+        mock_token_response_initial.raise_for_status = MagicMock()
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_token_client_initial = MagicMock()
+            mock_token_client_initial.post.return_value = mock_token_response_initial
+            mock_token_client_initial.__enter__ = MagicMock(
+                return_value=mock_token_client_initial
+            )
+            mock_token_client_initial.__exit__ = MagicMock(return_value=False)
+
+            # Token refresh will fail
+            mock_token_client_refresh = MagicMock()
+            mock_token_client_refresh.post.side_effect = Exception("Token refresh failed")
+            mock_token_client_refresh.__enter__ = MagicMock(
+                return_value=mock_token_client_refresh
+            )
+            mock_token_client_refresh.__exit__ = MagicMock(return_value=False)
+
+            mock_client_class.side_effect = [
+                mock_token_client_initial,
+                mock_api_client,
+                mock_token_client_refresh,
+            ]
+
+            from growthnav.connectors.adapters.zoho import ZohoConnector
+
+            connector = ZohoConnector(zoho_config)
+            connector.authenticate()
+
+            # Should raise AuthenticationError, not SchemaError
+            with pytest.raises(AuthenticationError, match="Failed to refresh"):
+                connector.get_schema()
