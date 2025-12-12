@@ -61,20 +61,27 @@ class SalesforceConnector(BaseConnector):
         - query: Custom SOQL query (overrides object_type)
 
     Example:
+        import os
+
         config = ConnectorConfig(
             connector_type=ConnectorType.SALESFORCE,
             customer_id="acme",
             name="Salesforce Opportunities",
             credentials={
-                "username": "user@company.com",
-                "password": "password",
-                "security_token": "token123",
+                "username": os.environ["SALESFORCE_USERNAME"],
+                "password": os.environ["SALESFORCE_PASSWORD"],
+                "security_token": os.environ["SALESFORCE_SECURITY_TOKEN"],
             },
             connection_params={
                 "domain": "login",
                 "object_type": "Opportunity",
             }
         )
+
+    Environment Variables:
+        SALESFORCE_USERNAME: Salesforce username
+        SALESFORCE_PASSWORD: Salesforce password
+        SALESFORCE_SECURITY_TOKEN: Salesforce security token
     """
 
     connector_type = ConnectorType.SALESFORCE

@@ -109,14 +109,15 @@ class ZohoConnector(BaseConnector):
           zohoapis.com.au (AU), zohoapis.in (IN), zohoapis.jp (JP)
 
     Example:
+        >>> import os
         >>> config = ConnectorConfig(
         ...     connector_type=ConnectorType.ZOHO,
         ...     customer_id="acme",
         ...     name="Zoho Deals",
         ...     credentials={
-        ...         "client_id": "your_client_id",
-        ...         "client_secret": "your_client_secret",
-        ...         "refresh_token": "your_refresh_token",
+        ...         "client_id": os.environ["ZOHO_CLIENT_ID"],
+        ...         "client_secret": os.environ["ZOHO_CLIENT_SECRET"],
+        ...         "refresh_token": os.environ["ZOHO_REFRESH_TOKEN"],
         ...     },
         ...     connection_params={
         ...         "module": "Deals",
@@ -126,6 +127,11 @@ class ZohoConnector(BaseConnector):
         >>> connector = ZohoConnector(config)
         >>> connector.authenticate()  # Gets initial access token
         >>> records = list(connector.fetch_records())  # Auto-refreshes if token expires
+
+    Environment Variables:
+        ZOHO_CLIENT_ID: Zoho OAuth client ID
+        ZOHO_CLIENT_SECRET: Zoho OAuth client secret
+        ZOHO_REFRESH_TOKEN: Zoho OAuth refresh token
     """
 
     connector_type = ConnectorType.ZOHO

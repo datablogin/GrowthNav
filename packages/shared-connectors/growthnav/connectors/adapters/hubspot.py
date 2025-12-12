@@ -33,17 +33,22 @@ class HubSpotConnector(BaseConnector):
         - object_type: "deals", "contacts", or "companies" (default: deals)
 
     Example:
+        import os
+
         config = ConnectorConfig(
             connector_type=ConnectorType.HUBSPOT,
             customer_id="acme",
             name="HubSpot Deals",
             credentials={
-                "access_token": "pat-na1-xxx",
+                "access_token": os.environ["HUBSPOT_ACCESS_TOKEN"],
             },
             connection_params={
                 "object_type": "deals",
             }
         )
+
+    Environment Variables:
+        HUBSPOT_ACCESS_TOKEN: HubSpot private app access token
     """
 
     connector_type = ConnectorType.HUBSPOT
