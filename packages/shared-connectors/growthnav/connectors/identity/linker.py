@@ -29,6 +29,13 @@ from growthnav.connectors.identity.fragments import (
 
 logger = logging.getLogger(__name__)
 
+# Email validation pattern
+# Matches: local-part@domain.tld
+# - Local part: alphanumeric, dots, underscores, percent, plus, hyphen
+# - Domain: alphanumeric and dots, must end with TLD of at least 2 chars
+# - Limitations: ASCII only (no internationalized domains), pragmatic validation (not RFC 5322 compliant)
+EMAIL_PATTERN = re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z]{2,}$")
+
 
 class IdentityLinker:
     """Link customer identities across multiple source systems.
@@ -132,17 +139,30 @@ class IdentityLinker:
     def _normalize_email(self, record: dict) -> str:
         """Normalize email address to lowercase and strip whitespace.
 
+        Validates email format using a regex pattern that checks for:
+        - Valid local part (before @): alphanumeric, dots, underscores, percent, plus, hyphen
+        - Valid domain (after @): alphanumeric and dots, with TLD of at least 2 characters
+
         Args:
             record: Raw record dictionary.
 
         Returns:
             Normalized email address or empty string if invalid.
+
+        Examples:
+            >>> linker = IdentityLinker()
+            >>> linker._normalize_email({"email": "user@example.com"})
+            'user@example.com'
+            >>> linker._normalize_email({"email": "@@@"})
+            ''
+            >>> linker._normalize_email({"email": "a@b"})
+            ''
         """
         email = record.get("email") or record.get("email_address") or ""
         if isinstance(email, str):
             email = email.lower().strip()
-            # Basic validation - must contain @ and have reasonable length
-            if "@" in email and len(email) > 3:
+            # Validate using regex pattern
+            if EMAIL_PATTERN.match(email):
                 return email
         return ""
 
