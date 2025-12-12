@@ -260,6 +260,8 @@ class TestSheetsExporterIntegration:
         assert second_record["conversions"] == 350
 
     @pytest.mark.integration
+    @pytest.mark.rate_limited
+    @pytest.mark.flaky(reruns=2, reruns_delay=10)
     def test_share_with_users(
         self,
         exporter: SheetsExporter,

@@ -105,3 +105,15 @@ class TestIdentityLinkerCleanup:
         # Verify close was called
         assert len(linker._records) == 0
         assert linker._linker is None
+
+    def test_del_calls_close(self) -> None:
+        """Test __del__ calls close() when object is garbage collected."""
+        linker = IdentityLinker()
+        linker.add_records([{"id": "1", "email": "test@example.com"}], source="test")
+
+        # Call __del__ explicitly to simulate garbage collection
+        linker.__del__()
+
+        # Verify close was called
+        assert len(linker._records) == 0
+        assert linker._linker is None

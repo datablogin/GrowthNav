@@ -15,6 +15,7 @@ Example:
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import re
 import uuid
@@ -33,7 +34,8 @@ logger = logging.getLogger(__name__)
 # Matches: local-part@domain.tld
 # - Local part: alphanumeric, dots, underscores, percent, plus, hyphen
 # - Domain: alphanumeric and dots, must end with TLD of at least 2 chars
-EMAIL_PATTERN = re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
+# - Limitations: ASCII only (no internationalized domains), pragmatic validation (not RFC 5322 compliant)
+EMAIL_PATTERN = re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z]{2,}$")
 
 
 class IdentityLinker:
@@ -101,6 +103,12 @@ class IdentityLinker:
             exc_tb: Exception traceback if an exception was raised.
         """
         self.close()
+
+    def __del__(self) -> None:
+        """Clean up when object is garbage collected."""
+        with contextlib.suppress(Exception):
+            self.close()
+
 
     def close(self) -> None:
         """Clean up Splink resources.
