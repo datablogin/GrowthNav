@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from growthnav.connectors.identity import IdentityLinker
 
 
@@ -117,3 +118,33 @@ class TestIdentityLinkerCleanup:
         # Verify close was called
         assert len(linker._records) == 0
         assert linker._linker is None
+
+    def test_add_records_raises_after_close(self) -> None:
+        """Test add_records() raises RuntimeError after close()."""
+        linker = IdentityLinker()
+        linker.close()
+
+        with pytest.raises(RuntimeError, match="Cannot add records to a closed IdentityLinker"):
+            linker.add_records([{"id": "1", "email": "test@example.com"}], source="test")
+
+    def test_resolve_raises_after_close(self) -> None:
+        """Test resolve() raises RuntimeError after close()."""
+        linker = IdentityLinker()
+        linker.add_records([{"id": "1", "email": "test@example.com"}], source="test")
+        linker.close()
+
+        with pytest.raises(
+            RuntimeError, match="Cannot resolve identities on a closed IdentityLinker"
+        ):
+            linker.resolve(match_threshold=0.7)
+
+    def test_resolve_deterministic_raises_after_close(self) -> None:
+        """Test resolve_deterministic() raises RuntimeError after close()."""
+        linker = IdentityLinker()
+        linker.add_records([{"id": "1", "email": "test@example.com"}], source="test")
+        linker.close()
+
+        with pytest.raises(
+            RuntimeError, match="Cannot resolve identities on a closed IdentityLinker"
+        ):
+            linker.resolve_deterministic()
