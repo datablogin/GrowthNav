@@ -11,6 +11,7 @@ dev-dependencies = [
     "pytest-asyncio>=0.23.0",
     "pytest-cov>=4.0.0",
     "pytest-mock>=3.12.0",
+    "pytest-rerunfailures>=14.0",
     "mypy>=1.8.0",
     "ruff>=0.3.0",
 ]
@@ -29,6 +30,10 @@ ignore = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["packages/*/tests"]
+markers = [
+    "integration: marks tests as integration tests (deselect with '-m \"not integration\"')",
+    "rate_limited: marks tests that may fail due to API rate limits",
+]
 
 [tool.mypy]
 python_version = "3.11"

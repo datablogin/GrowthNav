@@ -112,7 +112,12 @@ class SalesforceConnector(BaseConnector):
             logger.info("Connected to Salesforce")
         except Exception as e:
             raise AuthenticationError(
-                f"Failed to authenticate with Salesforce: {e}"
+                f"Failed to authenticate with Salesforce: {e}. "
+                f"Please verify: (1) username and password are correct, "
+                f"(2) security token is valid (append to password if not using IP whitelist), "
+                f"(3) user has API access enabled in their profile, "
+                f"(4) IP restrictions allow this connection, "
+                f"(5) domain is correct ('login' for production, 'test' for sandbox)."
             ) from e
 
     def fetch_records(
