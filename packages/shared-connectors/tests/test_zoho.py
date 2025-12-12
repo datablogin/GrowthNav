@@ -720,14 +720,16 @@ class TestZohoConnector:
                 list(connector.fetch_records())
 
     def test_invalid_domain_raises_error(self, zoho_config: ConnectorConfig) -> None:
-        """Test invalid domain raises ValueError during initialization."""
+        """Test invalid domain raises ValueError during authentication."""
         zoho_config.connection_params["domain"] = "evil-domain.com"
 
         from growthnav.connectors.adapters.zoho import ZohoConnector
 
-        # Domain is now validated in __init__, so this raises immediately
+        connector = ZohoConnector(zoho_config)
+
+        # Domain is validated during authenticate() for backward compatibility
         with pytest.raises(ValueError, match="Invalid Zoho domain"):
-            ZohoConnector(zoho_config)
+            connector.authenticate()
 
     def test_authenticate_failure(self, zoho_config: ConnectorConfig) -> None:
         """Test authentication failure raises AuthenticationError."""
@@ -1471,3 +1473,88 @@ class TestZohoConnectorTokenRefresh:
             # Both token and header should be updated
             assert connector._access_token == "new_token"
             assert mock_api_client.headers["Authorization"] == "Zoho-oauthtoken new_token"
+
+    def test_token_already_refreshed_by_another_thread(
+        self, zoho_config: ConnectorConfig
+    ) -> None:
+        """Test that token refresh is skipped if another thread already refreshed."""
+        mock_401_response = MagicMock()
+        mock_401_response.status_code = 401
+        mock_401_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "Unauthorized",
+            request=MagicMock(),
+            response=mock_401_response,
+        )
+
+        mock_success_response = MagicMock()
+        mock_success_response.json.return_value = {
+            "data": [{"id": "001", "Deal_Name": "Test Deal"}],
+            "info": {"more_records": False},
+        }
+        mock_success_response.raise_for_status = MagicMock()
+
+        mock_api_client = MagicMock()
+        mock_api_client.headers = {"Authorization": "Zoho-oauthtoken old_token"}
+
+        mock_token_response = MagicMock()
+        mock_token_response.json.return_value = {"access_token": "initial_token"}
+        mock_token_response.raise_for_status = MagicMock()
+
+        def mock_get(*args, **kwargs):
+            # First call returns 401, second call succeeds
+            if mock_api_client.get.call_count == 1:
+                return mock_401_response
+            return mock_success_response
+
+        mock_api_client.get.side_effect = mock_get
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_token_client = MagicMock()
+            mock_token_client.post.return_value = mock_token_response
+            mock_token_client.__enter__ = MagicMock(return_value=mock_token_client)
+            mock_token_client.__exit__ = MagicMock(return_value=False)
+
+            mock_client_class.side_effect = [mock_token_client, mock_api_client]
+
+            from growthnav.connectors.adapters.zoho import ZohoConnector
+
+            connector = ZohoConnector(zoho_config)
+            connector.authenticate()
+
+            # Track if _refresh_access_token is called
+            refresh_called = False
+            original_refresh = connector._refresh_access_token
+
+            def mock_refresh():
+                nonlocal refresh_called
+                refresh_called = True
+                original_refresh()
+
+            connector._refresh_access_token = mock_refresh
+
+            # Replace the lock with a mock that simulates another thread
+            # having already refreshed the token
+            original_lock = connector._token_refresh_lock
+
+            class MockLock:
+                def __enter__(self_lock):
+                    # Simulate another thread changing the token
+                    connector._access_token = "already_refreshed_token"
+                    return self_lock
+
+                def __exit__(self_lock, *args):
+                    return False
+
+            connector._token_refresh_lock = MockLock()
+
+            records = list(connector.fetch_records())
+
+            # Should still succeed (retries with existing refreshed token)
+            assert len(records) == 1
+            assert records[0]["id"] == "001"
+
+            # _refresh_access_token should NOT have been called because token changed
+            assert not refresh_called
+
+            # Token should be the "already_refreshed" one
+            assert connector._access_token == "already_refreshed_token"

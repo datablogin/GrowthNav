@@ -84,9 +84,17 @@ def _validate_domain(domain: str) -> str:
 
 
 class ZohoConnector(BaseConnector):
-    """Connector for Zoho CRM.
+    """Connector for Zoho CRM with automatic OAuth token refresh.
 
-    Fetches Deals, Leads, and Accounts from Zoho CRM.
+    Fetches Deals, Leads, and Accounts from Zoho CRM. Handles OAuth token
+    expiration transparently by automatically refreshing the access token
+    when API calls return 401 Unauthorized.
+
+    Features:
+        - Automatic token refresh on 401 Unauthorized responses
+        - Thread-safe token refresh operations
+        - Configurable retry limits
+        - Support for all Zoho regional data centers
 
     Required credentials:
         - client_id: Zoho OAuth client ID
@@ -94,23 +102,30 @@ class ZohoConnector(BaseConnector):
         - refresh_token: Zoho OAuth refresh token
 
     Optional connection_params:
-        - module: "Deals", "Leads", or "Accounts" (default: Deals)
-        - domain: API domain (default: zohoapis.com)
+        - module: "Deals", "Leads", "Accounts", "Contacts", "Campaigns",
+          or "Cases" (default: Deals)
+        - domain: API domain for regional data centers (default: zohoapis.com)
+          Valid domains: zohoapis.com (US), zohoapis.eu (EU),
+          zohoapis.com.au (AU), zohoapis.in (IN), zohoapis.jp (JP)
 
     Example:
-        config = ConnectorConfig(
-            connector_type=ConnectorType.ZOHO,
-            customer_id="acme",
-            name="Zoho Deals",
-            credentials={
-                "client_id": "xxx",
-                "client_secret": "xxx",
-                "refresh_token": "xxx",
-            },
-            connection_params={
-                "module": "Deals",
-            }
-        )
+        >>> config = ConnectorConfig(
+        ...     connector_type=ConnectorType.ZOHO,
+        ...     customer_id="acme",
+        ...     name="Zoho Deals",
+        ...     credentials={
+        ...         "client_id": "your_client_id",
+        ...         "client_secret": "your_client_secret",
+        ...         "refresh_token": "your_refresh_token",
+        ...     },
+        ...     connection_params={
+        ...         "module": "Deals",
+        ...         "domain": "zohoapis.com",
+        ...     }
+        ... )
+        >>> connector = ZohoConnector(config)
+        >>> connector.authenticate()  # Gets initial access token
+        >>> records = list(connector.fetch_records())  # Auto-refreshes if token expires
     """
 
     connector_type = ConnectorType.ZOHO
@@ -124,9 +139,9 @@ class ZohoConnector(BaseConnector):
         self._access_token: str | None = None
         # Lock for thread-safe token refresh operations
         self._token_refresh_lock = threading.Lock()
-        # Initialize domain from connection params (validated on authenticate)
+        # Store raw domain, validate during authenticate() for backward compatibility
         params = self.config.connection_params
-        self._domain: str = _validate_domain(params.get("domain", "zohoapis.com"))
+        self._domain: str = params.get("domain", "zohoapis.com")
 
     def authenticate(self) -> None:
         """Get access token from Zoho.
@@ -135,6 +150,9 @@ class ZohoConnector(BaseConnector):
             ValueError: If domain is invalid.
             AuthenticationError: If authentication fails or credentials are missing.
         """
+        # Validate domain before attempting authentication
+        self._domain = _validate_domain(self._domain)
+
         try:
             self._refresh_access_token()
 
@@ -245,14 +263,24 @@ class ZohoConnector(BaseConnector):
                         f"(domain={self._domain}). Refreshing token "
                         f"(attempt {retries}/{self.MAX_TOKEN_REFRESH_RETRIES})..."
                     )
+                    # Capture current token before acquiring lock
+                    old_token = self._access_token
+
                     # Use lock to prevent concurrent token refresh attempts
                     with self._token_refresh_lock:
-                        self._refresh_access_token()
-                        self._update_client_authorization()
-                    logger.info(
-                        f"Token refresh successful for {self._domain}, "
-                        f"retrying {operation_name}"
-                    )
+                        # Check if another thread already refreshed the token
+                        if self._access_token != old_token:
+                            logger.info(
+                                f"Token already refreshed by another thread for "
+                                f"{self._domain}, retrying {operation_name}"
+                            )
+                        else:
+                            self._refresh_access_token()
+                            self._update_client_authorization()
+                            logger.info(
+                                f"Token refresh successful for {self._domain}, "
+                                f"retrying {operation_name}"
+                            )
                     continue
                 raise
 
