@@ -6,15 +6,16 @@ records across multiple source systems based on email, phone, name, and other
 identity fields.
 
 Example:
-    >>> linker = IdentityLinker()
-    >>> linker.add_records(shopify_records, source="shopify")
-    >>> linker.add_records(square_records, source="square")
-    >>> identities = linker.resolve(match_threshold=0.7)
-    >>> print(f"Found {len(identities)} unique identities")
+    >>> with IdentityLinker() as linker:
+    ...     linker.add_records(shopify_records, source="shopify")
+    ...     linker.add_records(square_records, source="square")
+    ...     identities = linker.resolve(match_threshold=0.7)
+    ...     print(f"Found {len(identities)} unique identities")
 """
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import re
 import uuid
@@ -50,21 +51,23 @@ class IdentityLinker:
         expect 1-2 GB RAM usage during resolution.
 
     Example:
-        >>> # Probabilistic matching
-        >>> linker = IdentityLinker()
-        >>> linker.add_records(
-        ...     [{"id": "1", "email": "john@example.com", "phone": "555-1234"}],
-        ...     source="shopify"
-        ... )
-        >>> linker.add_records(
-        ...     [{"id": "2", "email": "john@exmple.com", "phone": "5551234"}],
-        ...     source="square"
-        ... )
-        >>> identities = linker.resolve(match_threshold=0.7)
-        >>> # These may match despite typo in email due to fuzzy matching
+        >>> # Probabilistic matching with context manager (recommended)
+        >>> with IdentityLinker() as linker:
+        ...     linker.add_records(
+        ...         [{"id": "1", "email": "john@example.com", "phone": "555-1234"}],
+        ...         source="shopify"
+        ...     )
+        ...     linker.add_records(
+        ...         [{"id": "2", "email": "john@exmple.com", "phone": "5551234"}],
+        ...         source="square"
+        ...     )
+        ...     identities = linker.resolve(match_threshold=0.7)
+        >>> # Resources are automatically cleaned up
 
         >>> # Deterministic matching
-        >>> identities = linker.resolve_deterministic()
+        >>> with IdentityLinker() as linker:
+        ...     linker.add_records(records, source="shopify")
+        ...     identities = linker.resolve_deterministic()
         >>> # Only exact matches on email/phone/etc will be linked
     """
 
@@ -80,6 +83,54 @@ class IdentityLinker:
         self._records: list[dict[str, Any]] = []
         self._linker = None
         self._model_trained = False
+        self._closed = False
+
+    def __enter__(self) -> IdentityLinker:
+        """Enter context manager.
+
+        Returns:
+            Self for use in with statement.
+        """
+        return self
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        """Exit context manager and clean up resources.
+
+        Args:
+            exc_type: Exception type if an exception was raised.
+            exc_val: Exception value if an exception was raised.
+            exc_tb: Exception traceback if an exception was raised.
+        """
+        self.close()
+
+    def __del__(self) -> None:
+        """Clean up when object is garbage collected."""
+        with contextlib.suppress(Exception):
+            self.close()
+
+
+    def close(self) -> None:
+        """Clean up Splink resources.
+
+        Closes the DuckDB connection if Splink was used and clears internal state.
+        Safe to call multiple times - will only clean up once.
+        """
+        if self._closed:
+            return
+
+        if self._linker is not None:
+            # Close DuckDB connection if available
+            if hasattr(self._linker, "db_api"):
+                try:
+                    self._linker.db_api.close()
+                except Exception as e:
+                    logger.warning(f"Error closing Splink db_api: {e}")
+            self._linker = None
+
+        # Clear records to free memory
+        self._records.clear()
+        self._model_trained = False
+        self._closed = True
 
     def add_records(
         self,
