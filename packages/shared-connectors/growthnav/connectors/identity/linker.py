@@ -6,11 +6,11 @@ records across multiple source systems based on email, phone, name, and other
 identity fields.
 
 Example:
-    >>> linker = IdentityLinker()
-    >>> linker.add_records(shopify_records, source="shopify")
-    >>> linker.add_records(square_records, source="square")
-    >>> identities = linker.resolve(match_threshold=0.7)
-    >>> print(f"Found {len(identities)} unique identities")
+    >>> with IdentityLinker() as linker:
+    ...     linker.add_records(shopify_records, source="shopify")
+    ...     linker.add_records(square_records, source="square")
+    ...     identities = linker.resolve(match_threshold=0.7)
+    ...     print(f"Found {len(identities)} unique identities")
 """
 
 from __future__ import annotations
@@ -29,6 +29,12 @@ from growthnav.connectors.identity.fragments import (
 
 logger = logging.getLogger(__name__)
 
+# Email validation pattern
+# Matches: local-part@domain.tld
+# - Local part: alphanumeric, dots, underscores, percent, plus, hyphen
+# - Domain: alphanumeric and dots, must end with TLD of at least 2 chars
+EMAIL_PATTERN = re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
+
 
 class IdentityLinker:
     """Link customer identities across multiple source systems.
@@ -44,21 +50,23 @@ class IdentityLinker:
         expect 1-2 GB RAM usage during resolution.
 
     Example:
-        >>> # Probabilistic matching
-        >>> linker = IdentityLinker()
-        >>> linker.add_records(
-        ...     [{"id": "1", "email": "john@example.com", "phone": "555-1234"}],
-        ...     source="shopify"
-        ... )
-        >>> linker.add_records(
-        ...     [{"id": "2", "email": "john@exmple.com", "phone": "5551234"}],
-        ...     source="square"
-        ... )
-        >>> identities = linker.resolve(match_threshold=0.7)
-        >>> # These may match despite typo in email due to fuzzy matching
+        >>> # Probabilistic matching with context manager (recommended)
+        >>> with IdentityLinker() as linker:
+        ...     linker.add_records(
+        ...         [{"id": "1", "email": "john@example.com", "phone": "555-1234"}],
+        ...         source="shopify"
+        ...     )
+        ...     linker.add_records(
+        ...         [{"id": "2", "email": "john@exmple.com", "phone": "5551234"}],
+        ...         source="square"
+        ...     )
+        ...     identities = linker.resolve(match_threshold=0.7)
+        >>> # Resources are automatically cleaned up
 
         >>> # Deterministic matching
-        >>> identities = linker.resolve_deterministic()
+        >>> with IdentityLinker() as linker:
+        ...     linker.add_records(records, source="shopify")
+        ...     identities = linker.resolve_deterministic()
         >>> # Only exact matches on email/phone/etc will be linked
     """
 
@@ -73,6 +81,47 @@ class IdentityLinker:
         """Initialize the identity linker."""
         self._records: list[dict[str, Any]] = []
         self._linker = None
+        self._model_trained = False
+
+    def __enter__(self) -> IdentityLinker:
+        """Enter context manager.
+
+        Returns:
+            Self for use in with statement.
+        """
+        return self
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        """Exit context manager and clean up resources.
+
+        Args:
+            exc_type: Exception type if an exception was raised.
+            exc_val: Exception value if an exception was raised.
+            exc_tb: Exception traceback if an exception was raised.
+        """
+        self.close()
+
+    def __del__(self) -> None:
+        """Clean up resources when object is garbage collected."""
+        self.close()
+
+    def close(self) -> None:
+        """Clean up Splink resources.
+
+        Closes the DuckDB connection if Splink was used and clears internal state.
+        Safe to call multiple times - will only clean up once.
+        """
+        if self._linker is not None:
+            # Close DuckDB connection if available
+            if hasattr(self._linker, "db_api"):
+                try:
+                    self._linker.db_api.close()
+                except Exception as e:
+                    logger.warning(f"Error closing Splink db_api: {e}")
+            self._linker = None
+
+        # Clear records to free memory
+        self._records.clear()
         self._model_trained = False
 
     def add_records(
@@ -132,17 +181,30 @@ class IdentityLinker:
     def _normalize_email(self, record: dict) -> str:
         """Normalize email address to lowercase and strip whitespace.
 
+        Validates email format using a regex pattern that checks for:
+        - Valid local part (before @): alphanumeric, dots, underscores, percent, plus, hyphen
+        - Valid domain (after @): alphanumeric and dots, with TLD of at least 2 characters
+
         Args:
             record: Raw record dictionary.
 
         Returns:
             Normalized email address or empty string if invalid.
+
+        Examples:
+            >>> linker = IdentityLinker()
+            >>> linker._normalize_email({"email": "user@example.com"})
+            'user@example.com'
+            >>> linker._normalize_email({"email": "@@@"})
+            ''
+            >>> linker._normalize_email({"email": "a@b"})
+            ''
         """
         email = record.get("email") or record.get("email_address") or ""
         if isinstance(email, str):
             email = email.lower().strip()
-            # Basic validation - must contain @ and have reasonable length
-            if "@" in email and len(email) > 3:
+            # Validate using regex pattern
+            if EMAIL_PATTERN.match(email):
                 return email
         return ""
 

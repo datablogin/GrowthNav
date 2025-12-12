@@ -33,17 +33,22 @@ class HubSpotConnector(BaseConnector):
         - object_type: "deals", "contacts", or "companies" (default: deals)
 
     Example:
+        import os
+
         config = ConnectorConfig(
             connector_type=ConnectorType.HUBSPOT,
             customer_id="acme",
             name="HubSpot Deals",
             credentials={
-                "access_token": "pat-na1-xxx",
+                "access_token": os.environ["HUBSPOT_ACCESS_TOKEN"],
             },
             connection_params={
                 "object_type": "deals",
             }
         )
+
+    Environment Variables:
+        HUBSPOT_ACCESS_TOKEN: HubSpot private app access token
     """
 
     connector_type = ConnectorType.HUBSPOT
@@ -75,7 +80,12 @@ class HubSpotConnector(BaseConnector):
             logger.info("Connected to HubSpot")
         except Exception as e:
             raise AuthenticationError(
-                f"Failed to authenticate with HubSpot: {e}"
+                f"Failed to authenticate with HubSpot: {e}. "
+                f"Please verify: (1) access token is valid and not expired, "
+                f"(2) token has required scopes (crm.objects.contacts.read, "
+                f"crm.objects.companies.read, crm.objects.deals.read), "
+                f"(3) app is installed in the HubSpot account, "
+                f"(4) token permissions match the requested object types."
             ) from e
 
     def fetch_records(
