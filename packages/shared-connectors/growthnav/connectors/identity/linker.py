@@ -102,7 +102,6 @@ class IdentityLinker:
         """
         self.close()
 
-
     def close(self) -> None:
         """Clean up Splink resources.
 
@@ -142,6 +141,9 @@ class IdentityLinker:
             source: Name of the source system (e.g., "shopify", "square").
             id_column: Name of the ID column in the records. Defaults to "id".
 
+        Raises:
+            RuntimeError: If called after the linker has been closed.
+
         Example:
             >>> linker = IdentityLinker()
             >>> shopify_records = [
@@ -150,6 +152,9 @@ class IdentityLinker:
             ... ]
             >>> linker.add_records(shopify_records, source="shopify", id_column="customer_id")
         """
+        if self._closed:
+            raise RuntimeError("Cannot add records to a closed IdentityLinker")
+
         for record in records:
             # Extract source ID
             source_id = record.get(id_column, "")
@@ -267,6 +272,7 @@ class IdentityLinker:
             List of resolved identities with linked fragments.
 
         Raises:
+            RuntimeError: If called after the linker has been closed.
             ImportError: If Splink is not installed. Install with
                 `pip install growthnav-connectors[identity]`.
 
@@ -278,6 +284,9 @@ class IdentityLinker:
             ...     print(f"Global ID: {identity.global_id}")
             ...     print(f"Fragments: {len(identity.fragments)}")
         """
+        if self._closed:
+            raise RuntimeError("Cannot resolve identities on a closed IdentityLinker")
+
         try:
             from splink import DuckDBAPI, block_on
             from splink.comparison_library import (
@@ -524,12 +533,18 @@ class IdentityLinker:
         Returns:
             List of resolved identities with match_probability=1.0.
 
+        Raises:
+            RuntimeError: If called after the linker has been closed.
+
         Example:
             >>> linker = IdentityLinker()
             >>> linker.add_records(records, source="shopify")
             >>> identities = linker.resolve_deterministic()
             >>> # Only exact matches will be linked
         """
+        if self._closed:
+            raise RuntimeError("Cannot resolve identities on a closed IdentityLinker")
+
         if not self._records:
             logger.warning("No records to resolve")
             return []
