@@ -1534,8 +1534,6 @@ class TestZohoConnectorTokenRefresh:
 
             # Replace the lock with a mock that simulates another thread
             # having already refreshed the token
-            original_lock = connector._token_refresh_lock
-
             class MockLock:
                 def __enter__(self_lock):
                     # Simulate another thread changing the token
