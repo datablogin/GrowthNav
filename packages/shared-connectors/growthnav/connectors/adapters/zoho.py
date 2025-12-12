@@ -165,7 +165,13 @@ class ZohoConnector(BaseConnector):
             logger.info(f"Connected to Zoho CRM (domain={self._domain})")
         except Exception as e:
             raise AuthenticationError(
-                f"Failed to authenticate with Zoho CRM: {e}"
+                f"Failed to authenticate with Zoho CRM: {e}. "
+                f"Please verify: (1) client_id and client_secret are correct, "
+                f"(2) refresh_token is valid and not expired, "
+                f"(3) OAuth app is configured correctly in Zoho, "
+                f"(4) domain matches your Zoho data center "
+                f"(zohoapis.com, zohoapis.eu, zohoapis.in, etc.), "
+                f"(5) required CRM scopes are granted to the app."
             ) from e
 
     def _refresh_access_token(self) -> None:
@@ -205,7 +211,13 @@ class ZohoConnector(BaseConnector):
                 logger.info(f"Zoho access token refreshed successfully (domain={self._domain})")
         except Exception as e:
             raise AuthenticationError(
-                f"Failed to refresh Zoho access token: {e}"
+                f"Failed to refresh Zoho access token: {e}. "
+                f"Please verify: (1) client_id and client_secret are correct, "
+                f"(2) refresh_token is valid and not expired, "
+                f"(3) OAuth app is configured correctly in Zoho, "
+                f"(4) domain matches your Zoho data center "
+                f"(zohoapis.com, zohoapis.eu, zohoapis.in, etc.), "
+                f"(5) required CRM scopes are granted to the app."
             ) from e
 
     def _update_client_authorization(self) -> None:

@@ -75,7 +75,12 @@ class HubSpotConnector(BaseConnector):
             logger.info("Connected to HubSpot")
         except Exception as e:
             raise AuthenticationError(
-                f"Failed to authenticate with HubSpot: {e}"
+                f"Failed to authenticate with HubSpot: {e}. "
+                f"Please verify: (1) access token is valid and not expired, "
+                f"(2) token has required scopes (crm.objects.contacts.read, "
+                f"crm.objects.companies.read, crm.objects.deals.read), "
+                f"(3) app is installed in the HubSpot account, "
+                f"(4) token permissions match the requested object types."
             ) from e
 
     def fetch_records(
