@@ -288,6 +288,8 @@ class TestSlidesGeneratorIntegration:
 
         assert long_title in presentation["title"]
 
+    @pytest.mark.rate_limited
+    @pytest.mark.flaky(reruns=2, reruns_delay=10)
     def test_multiple_presentations_sequential(self, generator, created_presentations):
         """Test creating multiple presentations in sequence."""
         for i in range(3):
