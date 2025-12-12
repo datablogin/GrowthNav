@@ -720,15 +720,14 @@ class TestZohoConnector:
                 list(connector.fetch_records())
 
     def test_invalid_domain_raises_error(self, zoho_config: ConnectorConfig) -> None:
-        """Test invalid domain raises ValueError."""
+        """Test invalid domain raises ValueError during initialization."""
         zoho_config.connection_params["domain"] = "evil-domain.com"
 
         from growthnav.connectors.adapters.zoho import ZohoConnector
 
-        connector = ZohoConnector(zoho_config)
-
+        # Domain is now validated in __init__, so this raises immediately
         with pytest.raises(ValueError, match="Invalid Zoho domain"):
-            connector.authenticate()
+            ZohoConnector(zoho_config)
 
     def test_authenticate_failure(self, zoho_config: ConnectorConfig) -> None:
         """Test authentication failure raises AuthenticationError."""
@@ -1198,35 +1197,79 @@ class TestZohoConnectorTokenRefresh:
                 == "Zoho-oauthtoken new_token"
             )
 
-    def test_refresh_token_without_domain_set(
+    def test_domain_initialized_in_init(
         self, zoho_config: ConnectorConfig
     ) -> None:
-        """Test _refresh_access_token sets domain if not already set."""
-        mock_token_response = MagicMock()
-        mock_token_response.json.return_value = {"access_token": "token"}
-        mock_token_response.raise_for_status = MagicMock()
+        """Test that domain is initialized during __init__."""
+        from growthnav.connectors.adapters.zoho import ZohoConnector
+
+        connector = ZohoConnector(zoho_config)
+
+        # Domain should be set during init (default: zohoapis.com)
+        assert connector._domain == "zohoapis.com"
+
+    def test_missing_credentials_raises_error(
+        self, zoho_config: ConnectorConfig
+    ) -> None:
+        """Test that missing credentials raise AuthenticationError."""
+        from growthnav.connectors.exceptions import AuthenticationError
+
+        # Remove a required credential
+        del zoho_config.credentials["client_secret"]
+
+        from growthnav.connectors.adapters.zoho import ZohoConnector
+
+        connector = ZohoConnector(zoho_config)
+
+        with pytest.raises(AuthenticationError, match="Missing required Zoho credentials"):
+            connector.authenticate()
+
+    def test_credential_validation_reraise_during_token_refresh(
+        self, zoho_config: ConnectorConfig
+    ) -> None:
+        """Test credential validation error is re-raised during token refresh retry."""
+        from growthnav.connectors.exceptions import AuthenticationError
+
+        mock_401_response = MagicMock()
+        mock_401_response.status_code = 401
+        mock_401_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "Unauthorized",
+            request=MagicMock(),
+            response=mock_401_response,
+        )
+
+        mock_api_client = MagicMock()
+        mock_api_client.get.return_value = mock_401_response
+        mock_api_client.headers = {"Authorization": "Zoho-oauthtoken old_token"}
+
+        mock_token_response_initial = MagicMock()
+        mock_token_response_initial.json.return_value = {"access_token": "initial_token"}
+        mock_token_response_initial.raise_for_status = MagicMock()
 
         with patch("httpx.Client") as mock_client_class:
-            mock_token_client = MagicMock()
-            mock_token_client.post.return_value = mock_token_response
-            mock_token_client.__enter__ = MagicMock(return_value=mock_token_client)
-            mock_token_client.__exit__ = MagicMock(return_value=False)
+            mock_token_client_initial = MagicMock()
+            mock_token_client_initial.post.return_value = mock_token_response_initial
+            mock_token_client_initial.__enter__ = MagicMock(
+                return_value=mock_token_client_initial
+            )
+            mock_token_client_initial.__exit__ = MagicMock(return_value=False)
 
-            mock_client_class.return_value = mock_token_client
+            mock_client_class.side_effect = [
+                mock_token_client_initial,
+                mock_api_client,
+            ]
 
             from growthnav.connectors.adapters.zoho import ZohoConnector
 
             connector = ZohoConnector(zoho_config)
+            connector.authenticate()
 
-            # Ensure domain is not set
-            assert connector._domain is None
+            # Now remove a credential to trigger validation error during refresh
+            del connector.config.credentials["client_secret"]
 
-            # Call _refresh_access_token directly without authenticate()
-            connector._refresh_access_token()
-
-            # Domain should now be set
-            assert connector._domain == "zohoapis.com"
-            assert connector._access_token == "token"
+            # Should raise AuthenticationError for missing credentials (re-raised path)
+            with pytest.raises(AuthenticationError, match="Missing required Zoho credentials"):
+                list(connector.fetch_records())
 
     def test_get_schema_reraises_authentication_error(
         self, zoho_config: ConnectorConfig

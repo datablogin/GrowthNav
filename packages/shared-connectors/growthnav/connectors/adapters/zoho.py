@@ -33,6 +33,13 @@ VALID_DOMAINS = {
     "zohoapis.com.cn",  # China
 }
 
+# Required credential keys for Zoho OAuth
+REQUIRED_CREDENTIALS = ("client_id", "client_secret", "refresh_token")
+
+# HTTP timeouts (in seconds)
+API_TIMEOUT = httpx.Timeout(30.0, connect=10.0)  # 30s read, 10s connect
+TOKEN_TIMEOUT = httpx.Timeout(10.0, connect=5.0)  # 10s read, 5s connect
+
 
 def _validate_module(module: str) -> str:
     """Validate Zoho module name.
@@ -113,24 +120,24 @@ class ZohoConnector(BaseConnector):
         """Initialize Zoho connector."""
         super().__init__(config)
         self._access_token: str | None = None
-        self._domain: str | None = None
+        # Initialize domain from connection params (validated on authenticate)
+        params = self.config.connection_params
+        self._domain: str = _validate_domain(params.get("domain", "zohoapis.com"))
 
     def authenticate(self) -> None:
         """Get access token from Zoho.
 
         Raises:
             ValueError: If domain is invalid.
-            AuthenticationError: If authentication fails.
+            AuthenticationError: If authentication fails or credentials are missing.
         """
-        params = self.config.connection_params
-        self._domain = _validate_domain(params.get("domain", "zohoapis.com"))
-
         try:
             self._refresh_access_token()
 
             self._client = httpx.Client(
                 base_url=f"https://www.{self._domain}/crm/v3",
                 headers={"Authorization": f"Zoho-oauthtoken {self._access_token}"},
+                timeout=API_TIMEOUT,
             )
             self._authenticated = True
             logger.info("Connected to Zoho CRM")
@@ -146,17 +153,21 @@ class ZohoConnector(BaseConnector):
         response indicates the token has expired.
 
         Raises:
-            AuthenticationError: If token refresh fails.
+            AuthenticationError: If token refresh fails or credentials are missing.
         """
-        if not self._domain:
-            params = self.config.connection_params
-            self._domain = _validate_domain(params.get("domain", "zohoapis.com"))
-
         creds = self.config.credentials
+
+        # Validate required credentials are present
+        missing = [key for key in REQUIRED_CREDENTIALS if key not in creds]
+        if missing:
+            raise AuthenticationError(
+                f"Missing required Zoho credentials: {', '.join(missing)}"
+            )
+
         token_url = f"https://accounts.{self._domain}/oauth/v2/token"
 
         try:
-            with httpx.Client() as client:
+            with httpx.Client(timeout=TOKEN_TIMEOUT) as client:
                 response = client.post(
                     token_url,
                     data={
@@ -170,6 +181,9 @@ class ZohoConnector(BaseConnector):
                 data = response.json()
                 self._access_token = data["access_token"]
                 logger.info("Zoho access token refreshed successfully")
+        except AuthenticationError:
+            # Re-raise our own validation errors directly
+            raise
         except Exception as e:
             raise AuthenticationError(
                 f"Failed to refresh Zoho access token: {e}"
@@ -214,6 +228,7 @@ class ZohoConnector(BaseConnector):
                     )
                     self._refresh_access_token()
                     self._update_client_authorization()
+                    logger.info(f"Token refresh successful, retrying {operation_name}")
                     continue
                 raise
 
@@ -247,20 +262,16 @@ class ZohoConnector(BaseConnector):
         count = 0
         while True:
             # Use token refresh wrapper for API call
-            # Capture current page value in closure to avoid B023 warning
-            current_page = page
-
-            def fetch_page(p: int = current_page) -> httpx.Response:
-                resp = cast(
-                    httpx.Response,
-                    self._client.get(
-                        f"/{module}",
-                        params={
-                            "page": p,
-                            "per_page": 200,
-                        },
-                    ),
-                )
+            # Capture current page value in default arg to avoid B023 closure warning
+            def fetch_page(p: int = page) -> httpx.Response:
+                # cast() needed because self._client is typed as Any in BaseConnector
+                resp = cast(httpx.Response, self._client.get(
+                    f"/{module}",
+                    params={
+                        "page": p,
+                        "per_page": 200,
+                    },
+                ))
                 resp.raise_for_status()
                 return resp
 
@@ -322,10 +333,10 @@ class ZohoConnector(BaseConnector):
 
         try:
             def fetch_schema() -> httpx.Response:
-                resp = cast(
-                    httpx.Response,
-                    self._client.get("/settings/fields", params={"module": module}),
-                )
+                # cast() needed because self._client is typed as Any in BaseConnector
+                resp = cast(httpx.Response, self._client.get(
+                    "/settings/fields", params={"module": module}
+                ))
                 resp.raise_for_status()
                 return resp
 
