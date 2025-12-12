@@ -185,9 +185,6 @@ class ZohoConnector(BaseConnector):
                 data = response.json()
                 self._access_token = data["access_token"]
                 logger.info(f"Zoho access token refreshed successfully (domain={self._domain})")
-        except AuthenticationError:
-            # Re-raise our own validation errors directly
-            raise
         except Exception as e:
             raise AuthenticationError(
                 f"Failed to refresh Zoho access token: {e}"
