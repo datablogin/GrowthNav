@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
+import threading
 from collections.abc import Callable, Generator
 from datetime import datetime
+from functools import partial
 from typing import Any, TypeVar, cast
 
 import httpx
@@ -120,6 +122,8 @@ class ZohoConnector(BaseConnector):
         """Initialize Zoho connector."""
         super().__init__(config)
         self._access_token: str | None = None
+        # Lock for thread-safe token refresh operations
+        self._token_refresh_lock = threading.Lock()
         # Initialize domain from connection params (validated on authenticate)
         params = self.config.connection_params
         self._domain: str = _validate_domain(params.get("domain", "zohoapis.com"))
@@ -140,7 +144,7 @@ class ZohoConnector(BaseConnector):
                 timeout=API_TIMEOUT,
             )
             self._authenticated = True
-            logger.info("Connected to Zoho CRM")
+            logger.info(f"Connected to Zoho CRM (domain={self._domain})")
         except Exception as e:
             raise AuthenticationError(
                 f"Failed to authenticate with Zoho CRM: {e}"
@@ -180,7 +184,7 @@ class ZohoConnector(BaseConnector):
                 response.raise_for_status()
                 data = response.json()
                 self._access_token = data["access_token"]
-                logger.info("Zoho access token refreshed successfully")
+                logger.info(f"Zoho access token refreshed successfully (domain={self._domain})")
         except AuthenticationError:
             # Re-raise our own validation errors directly
             raise
@@ -204,6 +208,14 @@ class ZohoConnector(BaseConnector):
     ) -> T:
         """Execute an API operation with automatic token refresh on 401.
 
+        This method handles OAuth token expiration transparently. When an API call
+        returns 401 Unauthorized, it automatically refreshes the access token and
+        retries the operation once.
+
+        Thread Safety:
+            Token refresh is protected by a lock to prevent race conditions when
+            multiple threads attempt to refresh simultaneously.
+
         Args:
             operation: A callable that performs the API operation.
             operation_name: Description of the operation for logging.
@@ -214,6 +226,15 @@ class ZohoConnector(BaseConnector):
         Raises:
             httpx.HTTPStatusError: If the request fails after retry.
             AuthenticationError: If token refresh fails.
+
+        Example:
+            >>> def fetch_deals() -> httpx.Response:
+            ...     return self._client.get("/Deals")
+            >>> response = self._execute_with_token_refresh(
+            ...     fetch_deals, "fetch Deals"
+            ... )
+            # If the call returns 401, the token is refreshed and the
+            # operation is retried automatically.
         """
         retries = 0
         while True:
@@ -223,12 +244,18 @@ class ZohoConnector(BaseConnector):
                 if e.response.status_code == 401 and retries < self.MAX_TOKEN_REFRESH_RETRIES:
                     retries += 1
                     logger.warning(
-                        f"Zoho {operation_name} received 401 Unauthorized. "
-                        f"Refreshing token (attempt {retries}/{self.MAX_TOKEN_REFRESH_RETRIES})..."
+                        f"Zoho {operation_name} received 401 Unauthorized "
+                        f"(domain={self._domain}). Refreshing token "
+                        f"(attempt {retries}/{self.MAX_TOKEN_REFRESH_RETRIES})..."
                     )
-                    self._refresh_access_token()
-                    self._update_client_authorization()
-                    logger.info(f"Token refresh successful, retrying {operation_name}")
+                    # Use lock to prevent concurrent token refresh attempts
+                    with self._token_refresh_lock:
+                        self._refresh_access_token()
+                        self._update_client_authorization()
+                    logger.info(
+                        f"Token refresh successful for {self._domain}, "
+                        f"retrying {operation_name}"
+                    )
                     continue
                 raise
 
@@ -260,23 +287,24 @@ class ZohoConnector(BaseConnector):
         # Fetch with pagination
         page = 1
         count = 0
-        while True:
-            # Use token refresh wrapper for API call
-            # Capture current page value in default arg to avoid B023 closure warning
-            def fetch_page(p: int = page) -> httpx.Response:
-                # cast() needed because self._client is typed as Any in BaseConnector
-                resp = cast(httpx.Response, self._client.get(
-                    f"/{module}",
-                    params={
-                        "page": p,
-                        "per_page": 200,
-                    },
-                ))
-                resp.raise_for_status()
-                return resp
 
+        def _fetch_page(page_num: int) -> httpx.Response:
+            """Fetch a single page of records from Zoho."""
+            # cast() needed because self._client is typed as Any in BaseConnector
+            resp = cast(httpx.Response, self._client.get(
+                f"/{module}",
+                params={
+                    "page": page_num,
+                    "per_page": 200,
+                },
+            ))
+            resp.raise_for_status()
+            return resp
+
+        while True:
+            # Use functools.partial to bind current page value
             response = self._execute_with_token_refresh(
-                fetch_page, f"fetch {module} page {page}"
+                partial(_fetch_page, page), f"fetch {module} page {page}"
             )
             data = response.json()
 
