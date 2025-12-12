@@ -82,6 +82,7 @@ class IdentityLinker:
         self._records: list[dict[str, Any]] = []
         self._linker = None
         self._model_trained = False
+        self._closed = False
 
     def __enter__(self) -> IdentityLinker:
         """Enter context manager.
@@ -101,9 +102,6 @@ class IdentityLinker:
         """
         self.close()
 
-    def __del__(self) -> None:
-        """Clean up resources when object is garbage collected."""
-        self.close()
 
     def close(self) -> None:
         """Clean up Splink resources.
@@ -111,6 +109,9 @@ class IdentityLinker:
         Closes the DuckDB connection if Splink was used and clears internal state.
         Safe to call multiple times - will only clean up once.
         """
+        if self._closed:
+            return
+
         if self._linker is not None:
             # Close DuckDB connection if available
             if hasattr(self._linker, "db_api"):
@@ -123,6 +124,7 @@ class IdentityLinker:
         # Clear records to free memory
         self._records.clear()
         self._model_trained = False
+        self._closed = True
 
     def add_records(
         self,
