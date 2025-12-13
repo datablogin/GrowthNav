@@ -389,3 +389,45 @@ class TestRowToConfig:
         config = storage._row_to_config(mock_row)
 
         assert config.connection_params == {"account": "test.com"}
+
+    def test_raises_type_error_for_invalid_connection_params_type(self):
+        """Test conversion raises TypeError for invalid connection_params type."""
+        from growthnav.connectors.storage import ConnectorStorage
+
+        mock_row = {
+            "connector_id": "test-id",
+            "customer_id": "test_customer",
+            "connector_type": "snowflake",
+            "name": "Test",
+            "connection_params": ["invalid", "list"],  # Invalid type
+            "field_overrides": {},
+            "sync_mode": "incremental",
+            "sync_schedule": "daily",
+            "is_active": True,
+        }
+
+        storage = ConnectorStorage(project_id="my-project", client=MagicMock())
+
+        with pytest.raises(TypeError, match="Unexpected type for connection_params: list"):
+            storage._row_to_config(mock_row)
+
+    def test_raises_type_error_for_invalid_field_overrides_type(self):
+        """Test conversion raises TypeError for invalid field_overrides type."""
+        from growthnav.connectors.storage import ConnectorStorage
+
+        mock_row = {
+            "connector_id": "test-id",
+            "customer_id": "test_customer",
+            "connector_type": "snowflake",
+            "name": "Test",
+            "connection_params": {},
+            "field_overrides": 12345,  # Invalid type
+            "sync_mode": "incremental",
+            "sync_schedule": "daily",
+            "is_active": True,
+        }
+
+        storage = ConnectorStorage(project_id="my-project", client=MagicMock())
+
+        with pytest.raises(TypeError, match="Unexpected type for field_overrides: int"):
+            storage._row_to_config(mock_row)

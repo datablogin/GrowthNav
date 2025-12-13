@@ -354,19 +354,43 @@ class ConnectorStorage:
         return (result.num_dml_affected_rows or 0) > 0
 
     def _row_to_config(self, row: Any) -> ConnectorConfig:
-        """Convert a BigQuery row to ConnectorConfig."""
-        # Parse JSON fields
+        """Convert a BigQuery row to ConnectorConfig.
+
+        Args:
+            row: BigQuery row containing connector configuration.
+
+        Returns:
+            ConnectorConfig object.
+
+        Raises:
+            TypeError: If connection_params or field_overrides have unexpected types.
+        """
+        # Parse JSON fields with explicit type validation
         connection_params = row.get("connection_params")
         if isinstance(connection_params, str):
             connection_params = json.loads(connection_params)
+        elif isinstance(connection_params, dict):
+            pass  # Already parsed
         elif connection_params is None:
             connection_params = {}
+        else:
+            raise TypeError(
+                f"Unexpected type for connection_params: {type(connection_params).__name__}. "
+                f"Expected str, dict, or None."
+            )
 
         field_overrides = row.get("field_overrides")
         if isinstance(field_overrides, str):
             field_overrides = json.loads(field_overrides)
+        elif isinstance(field_overrides, dict):
+            pass  # Already parsed
         elif field_overrides is None:
             field_overrides = {}
+        else:
+            raise TypeError(
+                f"Unexpected type for field_overrides: {type(field_overrides).__name__}. "
+                f"Expected str, dict, or None."
+            )
 
         return ConnectorConfig(
             connector_type=ConnectorType(row["connector_type"]),
