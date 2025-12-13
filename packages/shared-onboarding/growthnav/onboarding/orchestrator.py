@@ -138,9 +138,9 @@ class OnboardingOrchestrator:
     def __init__(
         self,
         registry: CustomerRegistry | None = None,
-        provisioner: "DatasetProvisioner | None" = None,
-        credential_store: "CredentialStore | None" = None,
-        connector_storage: "ConnectorStorage | None" = None,
+        provisioner: DatasetProvisioner | None = None,
+        credential_store: CredentialStore | None = None,
+        connector_storage: ConnectorStorage | None = None,
         default_project_id: str | None = None,
     ):
         """Initialize the orchestrator.
@@ -180,7 +180,7 @@ class OnboardingOrchestrator:
         return self._credential_store
 
     @property
-    def connector_storage(self) -> "ConnectorStorage | None":
+    def connector_storage(self) -> ConnectorStorage | None:
         """Return connector storage (may be None if not configured)."""
         return self._connector_storage
 
