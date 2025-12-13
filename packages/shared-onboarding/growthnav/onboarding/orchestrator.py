@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 from growthnav.bigquery import Customer, CustomerRegistry, Industry
 
 if TYPE_CHECKING:
+    from growthnav.connectors import ConnectorStorage
     from growthnav.onboarding.provisioning import DatasetProvisioner
     from growthnav.onboarding.secrets import CredentialStore
 
@@ -139,7 +140,7 @@ class OnboardingOrchestrator:
         registry: CustomerRegistry | None = None,
         provisioner: DatasetProvisioner | None = None,
         credential_store: CredentialStore | None = None,
-        connector_storage: Any | None = None,
+        connector_storage: ConnectorStorage | None = None,
         default_project_id: str | None = None,
     ):
         """Initialize the orchestrator.
@@ -179,7 +180,7 @@ class OnboardingOrchestrator:
         return self._credential_store
 
     @property
-    def connector_storage(self) -> Any | None:
+    def connector_storage(self) -> ConnectorStorage | None:
         """Return connector storage (may be None if not configured)."""
         return self._connector_storage
 
